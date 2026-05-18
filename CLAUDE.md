@@ -13,12 +13,15 @@ Never move to the next step until the current step is green.
 
 ## Test file discipline
 
-- One file per step: `tests/stepN_<concept>.cpp`
-- Each step's file is complete and self-contained for that concept
-- Existing test files are never modified to remove cases
-- Test names follow the pattern `StepN_Concept.WhatItVerifies`
+- One test file per phase: `tests/phaseN_<name>.cpp`
+- Each phase file grows as steps are added — never split across files
+- Existing test cases are never removed
+- Test names follow the pattern `PhaseN_Concept.WhatItVerifies`
 - Type-trait guarantees go in `static_assert` at file scope, not in TEST() bodies
 - Always cover: happy path, edge cases, and polymorphic dispatch via base pointer
+- `phase0_setup.cpp` — build pipeline smoke test (permanent infrastructure)
+- `phase1_runtime.cpp` — all Phase 1 runtime tests (Status → BehaviorTree)
+- `phase2_schema.cpp` — all Phase 2 schema tests (added when Phase 2 begins)
 
 ## Step sizing
 
