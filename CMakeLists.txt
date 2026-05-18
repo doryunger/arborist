@@ -20,6 +20,7 @@ endif()
 
 # ── Dependencies ──────────────────────────────────────────────────────────────
 find_package(yaml-cpp REQUIRED)
+find_package(SQLite3 REQUIRED)
 
 # ── Library ───────────────────────────────────────────────────────────────────
 file(GLOB_RECURSE BT_SOURCES
@@ -27,12 +28,13 @@ file(GLOB_RECURSE BT_SOURCES
     src/builder/*.cpp
     src/validation/*.cpp
     src/schema/*.cpp
+    src/registry/*.cpp
 )
 
 if(BT_SOURCES)
     add_library(bt_framework ${BT_SOURCES})
     target_include_directories(bt_framework PUBLIC include)
-    target_link_libraries(bt_framework PUBLIC yaml-cpp)
+    target_link_libraries(bt_framework PUBLIC yaml-cpp SQLite::SQLite3)
 else()
     add_library(bt_framework INTERFACE)
     target_include_directories(bt_framework INTERFACE include)

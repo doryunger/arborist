@@ -4,6 +4,8 @@
 #include <unordered_set>
 #include <vector>
 
+#include "bt/RuntimeRegistry.h"
+
 #include "bt/Action.h"
 #include "bt/BehaviorEntry.h"
 #include "bt/Condition.h"
@@ -194,6 +196,23 @@ std::string_view SchemaManifest::get(std::string_view name) const {
 BehaviorTree SchemaLoader::load(std::string_view yaml, const LoaderRegistry& reg) {
     auto doc = SchemaParser::parse(yaml);
     return buildTree(doc, reg);
+}
+
+BehaviorTree SchemaLoader::load(std::string_view yaml, const RuntimeRegistry& reg) {
+    LoaderRegistry loaderReg;
+    for (const auto& action : reg.store().allActions()) {
+        const auto* func = reg.findAction(action.name);
+        if (func != nullptr) {
+            loaderReg.actions[action.name] = *func;
+        }
+    }
+    for (const auto& cond : reg.store().allConditions()) {
+        const auto* func = reg.findCondition(cond.name);
+        if (func != nullptr) {
+            loaderReg.conditions[cond.name] = *func;
+        }
+    }
+    return load(yaml, loaderReg);
 }
 
 BehaviorTree SchemaLoader::loadWithManifest(std::string_view yaml,
