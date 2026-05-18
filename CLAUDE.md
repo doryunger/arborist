@@ -13,10 +13,12 @@ Never move to the next step until the current step is green.
 
 ## Test file discipline
 
-- One evolving test file: `tests/test_arborist.cpp`
-- Each step adds new test cases — existing cases are never removed
-- Tests are cumulative: step N tests cover steps 1..N
-- Test names follow the pattern `StepN_WhatItVerifies`
+- One file per step: `tests/stepN_<concept>.cpp`
+- Each step's file is complete and self-contained for that concept
+- Existing test files are never modified to remove cases
+- Test names follow the pattern `StepN_Concept.WhatItVerifies`
+- Type-trait guarantees go in `static_assert` at file scope, not in TEST() bodies
+- Always cover: happy path, edge cases, and polymorphic dispatch via base pointer
 
 ## Step sizing
 
@@ -32,6 +34,27 @@ Key rules derived from the plan:
 - Parallel policy is always configurable per node (`ALL` / `ANY` / `THRESHOLD(n)`)
 - Validation runs before the first tick, never during
 - YAML conditions reference named C++ conditions only — no inline logic in schema
+
+## C++ standard and style
+
+This project targets **C++20**. Always use the most modern and safest syntax available.
+
+- Prefer `enum class` over plain `enum`
+- Prefer `std::string_view` over `const std::string&` for read-only strings
+- Prefer `std::unique_ptr` / `std::shared_ptr` over raw owning pointers
+- Prefer `[[nodiscard]]` on functions whose return value must not be ignored
+- Use `= delete` explicitly for unwanted special members
+- Use `noexcept` where the function cannot throw
+- Use `static_assert` for compile-time invariants
+- Use `dynamic_cast` for base-to-derived casts, never `static_cast`
+- Use `std::uint8_t`, `std::int32_t` etc. for sized integer types
+- Never use C-style casts (`(Type)value`) — use `static_cast`, `dynamic_cast`, or `std::bit_cast`
+- Never use raw arrays — use `std::array` or `std::vector`
+- Never use `NULL` — use `nullptr`
+- Never use `#define` for constants — use `constexpr`
+- Avoid deprecated standard library features — check cppreference for deprecation status
+
+clang-tidy enforces these rules at build time with `WarningsAsErrors`.
 
 ## What not to do
 
