@@ -9,6 +9,9 @@
 #include "bt/BehaviorTree.h"
 #include "bt/Status.h"
 
+// Forward declaration to avoid pulling in RuntimeRegistry.h everywhere.
+namespace bt { class RuntimeRegistry; }
+
 namespace bt {
 
 class SchemaLoadError : public std::runtime_error {
@@ -41,6 +44,7 @@ private:
 class SchemaLoader {
 public:
     [[nodiscard]] static BehaviorTree load(std::string_view yaml, const LoaderRegistry& reg);
+    [[nodiscard]] static BehaviorTree load(std::string_view yaml, const RuntimeRegistry& reg);
     [[nodiscard]] static BehaviorTree loadWithManifest(std::string_view yaml,
                                                         const SchemaManifest& manifest,
                                                         const LoaderRegistry& reg);
