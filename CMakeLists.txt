@@ -16,9 +16,14 @@ file(GLOB_RECURSE BT_SOURCES
     src/schema/*.cpp
 )
 
-add_library(bt_framework ${BT_SOURCES})
-target_include_directories(bt_framework PUBLIC include)
-target_link_libraries(bt_framework PUBLIC yaml-cpp)
+if(BT_SOURCES)
+    add_library(bt_framework ${BT_SOURCES})
+    target_include_directories(bt_framework PUBLIC include)
+    target_link_libraries(bt_framework PUBLIC yaml-cpp)
+else()
+    add_library(bt_framework INTERFACE)
+    target_include_directories(bt_framework INTERFACE include)
+endif()
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 enable_testing()
