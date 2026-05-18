@@ -1,5 +1,7 @@
 #pragma once
 
+#include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -19,6 +21,10 @@ public:
     Node& operator=(Node&&) = delete;
 
     [[nodiscard]] virtual Status tick() = 0;
+    [[nodiscard]] virtual std::string_view typeName() const noexcept = 0;
+    [[nodiscard]] virtual std::span<const std::unique_ptr<Node>> children() const noexcept {
+        return {};
+    }
 
     virtual void reset() {}
 

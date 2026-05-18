@@ -55,6 +55,48 @@ is useless. A warning that fires at startup is actionable.
 - Semantic validation (conditions that can never be true) is deferred to Phase 2 — structural
   checks only in Phase 1.
 
+### Implementation steps
+
+| Step | What | Key guarantee |
+|------|------|---------------|
+| 0 | Build pipeline, GTest smoke test | cmake + ctest green |
+| 1 | `Status` enum | All three values, `toString()`, stable underlying ints |
+| 2 | `Node` base class | Abstract, polymorphic, non-copyable, `reset()` for interruption |
+| 3 | `CompositeNode` + `Sequence` + `Selector` + `treeToString()` | RUNNING resumption, ASCII tree visualization, integration test |
+| 4 | `Parallel` node + `Policy` enum | ALL / ANY / THRESHOLD aggregation |
+| 5 | Leaf nodes — `Action`, `Condition` | Named callbacks, condition references |
+| 6 | `Blackboard` | Key-value store, lambda-backed values |
+| 7 | `BehaviorTree` + tick loop | Interruption policy, RUNNING resumption end-to-end |
+| 8 | Builder layer | Fluent API, `StateRegistry`, `PriorityResolver`, `TreeAssembler` |
+| 9 | Validation layer | Structural checks at registration time |
+| 10 | Decision emitter | Per-tick record: behavior evaluated, selected, blackboard snapshot |
+
+### Step 3 detail — Composites + Visualization
+
+**What gets built:**
+- `typeName()` pure virtual added to `Node` — each node type names itself
+- `children()` virtual accessor on `Node` — returns empty span for leaves, overridden by composites
+- `CompositeNode` — owns children via `vector<unique_ptr<Node>>`, tracks `currentChildIndex_` for RUNNING resumption, recursive `reset()`
+- `Sequence` — ticks children in order; FAILURE short-circuits and resets; SUCCESS after all children resets
+- `Selector` — ticks children in order; SUCCESS short-circuits and resets; FAILURE after all children resets
+- `treeToString()` — free function producing ASCII tree visualization
+
+**RUNNING resumption in composites:**
+When a child returns `RUNNING`, the composite saves `currentChildIndex_` and returns `RUNNING`.
+On the next tick it resumes from that index — not from child 0.
+This is verified explicitly: a counting node upstream of the RUNNING node must not be re-ticked on resumption.
+
+**Integration test:**
+Build this tree programmatically → verify ASCII output → tick four scenarios:
+```
+[Selector] root
+├── [Sequence] attack_sequence
+│   ├── [TestLeaf] enemy_visible
+│   └── [TestLeaf] attack
+└── [TestLeaf] patrol
+```
+Scenarios: enemy not visible (patrol runs), enemy visible + attack RUNNING (resumption), attack succeeds, attack fails (patrol fallback).
+
 ---
 
 ## Phase 2 — Schema Layer
