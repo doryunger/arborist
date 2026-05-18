@@ -1,16 +1,29 @@
 #include <gtest/gtest.h>
 
+#include <any>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <tuple>
 #include <type_traits>
 
+#include "bt/Action.h"
+#include "bt/BehaviorBuilder.h"
+#include "bt/BehaviorTree.h"
+#include "bt/Blackboard.h"
+#include "bt/Condition.h"
+#include "bt/DecisionEmitter.h"
 #include "bt/Node.h"
+#include "bt/Parallel.h"
+#include "bt/Policy.h"
+#include "bt/PriorityResolver.h"
 #include "bt/Selector.h"
 #include "bt/Sequence.h"
+#include "bt/StateRegistry.h"
 #include "bt/Status.h"
+#include "bt/TreeAssembler.h"
 #include "bt/TreeUtils.h"
+#include "bt/Validator.h"
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Test helpers
@@ -462,4 +475,458 @@ TEST_F(Phase1Integration, AttackFails_PatrolFallback) {
     patrol_->setStatus(bt::Status::SUCCESS);
     EXPECT_EQ(root_.tick(), bt::Status::SUCCESS);
     EXPECT_EQ(patrol_->tickCount(), 1);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Parallel + Policy
+// ═══════════════════════════════════════════════════════════════════════════════
+
+TEST(Phase1_Parallel, AllPolicy_AllSucceed) {
+    bt::Parallel par("par", bt::Policy::all());
+    par.addChild(makeLeaf("a", bt::Status::SUCCESS));
+    par.addChild(makeLeaf("b", bt::Status::SUCCESS));
+    EXPECT_EQ(par.tick(), bt::Status::SUCCESS);
+}
+
+TEST(Phase1_Parallel, AllPolicy_OneFailure) {
+    bt::Parallel par("par", bt::Policy::all());
+    par.addChild(makeLeaf("a", bt::Status::SUCCESS));
+    par.addChild(makeLeaf("b", bt::Status::FAILURE));
+    EXPECT_EQ(par.tick(), bt::Status::FAILURE);
+}
+
+TEST(Phase1_Parallel, AllPolicy_OneRunning) {
+    bt::Parallel par("par", bt::Policy::all());
+    par.addChild(makeLeaf("a", bt::Status::SUCCESS));
+    par.addChild(makeLeaf("b", bt::Status::RUNNING));
+    EXPECT_EQ(par.tick(), bt::Status::RUNNING);
+}
+
+TEST(Phase1_Parallel, AnyPolicy_OneSuccess) {
+    bt::Parallel par("par", bt::Policy::any());
+    par.addChild(makeLeaf("a", bt::Status::SUCCESS));
+    par.addChild(makeLeaf("b", bt::Status::FAILURE));
+    EXPECT_EQ(par.tick(), bt::Status::SUCCESS);
+}
+
+TEST(Phase1_Parallel, AnyPolicy_AllFail) {
+    bt::Parallel par("par", bt::Policy::any());
+    par.addChild(makeLeaf("a", bt::Status::FAILURE));
+    par.addChild(makeLeaf("b", bt::Status::FAILURE));
+    EXPECT_EQ(par.tick(), bt::Status::FAILURE);
+}
+
+TEST(Phase1_Parallel, AnyPolicy_Running) {
+    bt::Parallel par("par", bt::Policy::any());
+    par.addChild(makeLeaf("a", bt::Status::FAILURE));
+    par.addChild(makeLeaf("b", bt::Status::RUNNING));
+    EXPECT_EQ(par.tick(), bt::Status::RUNNING);
+}
+
+TEST(Phase1_Parallel, ThresholdPolicy_Satisfied) {
+    bt::Parallel par("par", bt::Policy::threshold(2));
+    par.addChild(makeLeaf("a", bt::Status::SUCCESS));
+    par.addChild(makeLeaf("b", bt::Status::SUCCESS));
+    par.addChild(makeLeaf("c", bt::Status::FAILURE));
+    EXPECT_EQ(par.tick(), bt::Status::SUCCESS);
+}
+
+TEST(Phase1_Parallel, ThresholdPolicy_Impossible) {
+    bt::Parallel par("par", bt::Policy::threshold(2));
+    par.addChild(makeLeaf("a", bt::Status::FAILURE));
+    par.addChild(makeLeaf("b", bt::Status::FAILURE));
+    par.addChild(makeLeaf("c", bt::Status::FAILURE));
+    EXPECT_EQ(par.tick(), bt::Status::FAILURE);
+}
+
+TEST(Phase1_Parallel, ThresholdPolicy_StillRunning) {
+    bt::Parallel par("par", bt::Policy::threshold(2));
+    par.addChild(makeLeaf("a", bt::Status::SUCCESS));
+    par.addChild(makeLeaf("b", bt::Status::RUNNING));
+    par.addChild(makeLeaf("c", bt::Status::RUNNING));
+    EXPECT_EQ(par.tick(), bt::Status::RUNNING);
+}
+
+TEST(Phase1_Parallel, TicksAllChildrenEveryCall) {
+    bt::Parallel par("par", bt::Policy::any());
+    auto* first = par.addChildAndGet(makeLeaf("a", bt::Status::RUNNING));
+    auto* second = par.addChildAndGet(makeLeaf("b", bt::Status::RUNNING));
+    std::ignore = par.tick();
+    std::ignore = par.tick();
+    EXPECT_EQ(first->tickCount(), 2);   // both ticked every call — no resumption
+    EXPECT_EQ(second->tickCount(), 2);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Action + Condition
+// ═══════════════════════════════════════════════════════════════════════════════
+
+TEST(Phase1_Action, CallbackInvokedOnTick) {
+    int callCount = 0;
+    bt::Action action("act", [&callCount] {
+        ++callCount;
+        return bt::Status::SUCCESS;
+    });
+    EXPECT_EQ(action.tick(), bt::Status::SUCCESS);
+    EXPECT_EQ(callCount, 1);
+}
+
+TEST(Phase1_Action, ReturnsCallbackStatus) {
+    bt::Action running("run", [] { return bt::Status::RUNNING; });
+    bt::Action failing("fail", [] { return bt::Status::FAILURE; });
+    EXPECT_EQ(running.tick(), bt::Status::RUNNING);
+    EXPECT_EQ(failing.tick(), bt::Status::FAILURE);
+}
+
+TEST(Phase1_Condition, TruePredicateReturnsSuccess) {
+    bt::Condition cond("cond", [] { return true; });
+    EXPECT_EQ(cond.tick(), bt::Status::SUCCESS);
+}
+
+TEST(Phase1_Condition, FalsePredicateReturnsFailure) {
+    bt::Condition cond("cond", [] { return false; });
+    EXPECT_EQ(cond.tick(), bt::Status::FAILURE);
+}
+
+TEST(Phase1_Condition, ReflectsChangingState) {
+    bool flag = false;
+    bt::Condition cond("cond", [&flag] { return flag; });
+    EXPECT_EQ(cond.tick(), bt::Status::FAILURE);
+    flag = true;
+    EXPECT_EQ(cond.tick(), bt::Status::SUCCESS);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Blackboard
+// ═══════════════════════════════════════════════════════════════════════════════
+
+TEST(Phase1_Blackboard, SetAndGet) {
+    bt::Blackboard board;
+    board.set<int>("health", 100);
+    EXPECT_EQ(board.get<int>("health"), 100);
+}
+
+TEST(Phase1_Blackboard, HasReturnsTrueForExistingKey) {
+    bt::Blackboard board;
+    board.set<bool>("visible", true);
+    EXPECT_TRUE(board.has("visible"));
+    EXPECT_FALSE(board.has("missing"));
+}
+
+TEST(Phase1_Blackboard, RegisterSourcePullsOnGet) {
+    bt::Blackboard board;
+    int engineValue = 42;
+    board.registerSource<int>("sensor", [&engineValue] { return engineValue; });
+    EXPECT_EQ(board.get<int>("sensor"), 42);
+    engineValue = 99;
+    EXPECT_EQ(board.get<int>("sensor"), 99);
+}
+
+TEST(Phase1_Blackboard, RefreshPullsAllSources) {
+    bt::Blackboard board;
+    int value = 1;
+    board.registerSource<int>("val", [&value] { return value; });
+    board.refresh();
+    value = 2;
+    // After refresh(), the snapshot is from before the change
+    EXPECT_EQ(board.get<int>("val"), 1);
+    board.refresh();
+    EXPECT_EQ(board.get<int>("val"), 2);
+}
+
+TEST(Phase1_Blackboard, OverwriteWithSet) {
+    bt::Blackboard board;
+    board.set<std::string>("name", "patrol");
+    board.set<std::string>("name", "attack");
+    EXPECT_EQ(board.get<std::string>("name"), "attack");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// BehaviorTree
+// ═══════════════════════════════════════════════════════════════════════════════
+
+TEST(Phase1_BehaviorTree, TickDrivesRootNode) {
+    bool ticked = false;
+    auto root = std::make_unique<bt::Action>("root", [&ticked] {
+        ticked = true;
+        return bt::Status::SUCCESS;
+    });
+    bt::BehaviorTree tree(std::move(root));
+    EXPECT_EQ(tree.tick(), bt::Status::SUCCESS);
+    EXPECT_TRUE(ticked);
+}
+
+TEST(Phase1_BehaviorTree, TickCountIncrements) {
+    auto root = std::make_unique<bt::Action>("root", [] { return bt::Status::RUNNING; });
+    bt::BehaviorTree tree(std::move(root));
+    std::ignore = tree.tick();
+    std::ignore = tree.tick();
+    EXPECT_EQ(tree.tickCount(), 2);
+}
+
+TEST(Phase1_BehaviorTree, BlackboardRefreshedBeforeTick) {
+    int engineValue = 10;
+    bt::Blackboard board;
+    board.registerSource<int>("val", [&engineValue] { return engineValue; });
+
+    auto root = std::make_unique<bt::Action>("root", [] { return bt::Status::SUCCESS; });
+
+    bt::DecisionEmitter emitter;
+    bt::BehaviorTree tree(std::move(root), std::move(board), {}, &emitter);
+
+    // Change value after board is moved into tree — refresh() must pull this update.
+    engineValue = 99;
+    std::ignore = tree.tick();
+
+    const auto& history = emitter.history();
+    ASSERT_FALSE(history.empty());
+    const auto& snapshot = history[0].blackboardSnapshot;
+    ASSERT_TRUE(snapshot.contains("val"));
+    EXPECT_EQ(std::any_cast<int>(snapshot.at("val")), 99);
+}
+
+TEST(Phase1_BehaviorTree, InterruptionSwitchesWhenHigherPriorityAvailable) {
+    bool highPriority = false;
+    int lowTicks = 0;
+    int highTicks = 0;
+
+    bt::BehaviorBuilder builder;
+    builder.behavior("high").when([&highPriority] { return highPriority; }).onTick([&highTicks] {
+        ++highTicks;
+        return bt::Status::RUNNING;
+    });
+    builder.behavior("low").onTick([&lowTicks] {
+        ++lowTicks;
+        return bt::Status::RUNNING;
+    });
+
+    auto tree = bt::TreeAssembler::assemble(
+        std::vector<bt::BehaviorEntry>(builder.entries().begin(), builder.entries().end()));
+
+    std::ignore = tree.tick();  // low runs (high condition false)
+    EXPECT_EQ(lowTicks, 1);
+    EXPECT_EQ(highTicks, 0);
+
+    highPriority = true;
+    std::ignore = tree.tick();  // interrupts low, high runs
+    EXPECT_EQ(highTicks, 1);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Builder layer
+// ═══════════════════════════════════════════════════════════════════════════════
+
+TEST(Phase1_BehaviorBuilder, RegistersBehaviorsInOrder) {
+    bt::BehaviorBuilder builder;
+    builder.behavior("attack").when([] { return true; }).onTick([] { return bt::Status::RUNNING; });
+    builder.behavior("patrol").onTick([] { return bt::Status::SUCCESS; });
+    EXPECT_EQ(builder.entries().size(), 2);
+    EXPECT_EQ(builder.entries()[0].name, "attack");
+    EXPECT_EQ(builder.entries()[1].name, "patrol");
+}
+
+TEST(Phase1_BehaviorBuilder, ConditionStoredCorrectly) {
+    bt::BehaviorBuilder builder;
+    builder.behavior("test").when([] { return true; }).onTick([] { return bt::Status::SUCCESS; });
+    EXPECT_TRUE(builder.entries()[0].condition);
+    EXPECT_TRUE(builder.entries()[0].condition());
+}
+
+TEST(Phase1_BehaviorBuilder, InterruptibleFlagStored) {
+    bt::BehaviorBuilder builder;
+    builder.behavior("test")
+        .onTick([] { return bt::Status::SUCCESS; })
+        .interruptible(false);
+    EXPECT_FALSE(builder.entries()[0].interruptible);
+}
+
+TEST(Phase1_PriorityResolver, ReturnsFirstValidBehavior) {
+    std::vector<bt::BehaviorEntry> entries;
+    entries.push_back({.name = "a",
+                        .condition = [] { return false; },
+                        .onTick = [] { return bt::Status::SUCCESS; }});
+    entries.push_back({.name = "b",
+                        .condition = [] { return true; },
+                        .onTick = [] { return bt::Status::SUCCESS; }});
+    auto result = bt::PriorityResolver::resolve(entries);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, 1);
+}
+
+TEST(Phase1_PriorityResolver, NullConditionIsAlwaysValid) {
+    std::vector<bt::BehaviorEntry> entries;
+    entries.push_back({.name = "default", .onTick = [] { return bt::Status::SUCCESS; }});
+    auto result = bt::PriorityResolver::resolve(entries);
+    ASSERT_TRUE(result.has_value());
+    EXPECT_EQ(*result, 0);
+}
+
+TEST(Phase1_PriorityResolver, ReturnsNulloptWhenNoneValid) {
+    std::vector<bt::BehaviorEntry> entries;
+    entries.push_back({.name = "a",
+                        .condition = [] { return false; },
+                        .onTick = [] { return bt::Status::SUCCESS; }});
+    EXPECT_FALSE(bt::PriorityResolver::resolve(entries).has_value());
+}
+
+TEST(Phase1_StateRegistry, AppliesSourcestoBlackboard) {
+    bt::StateRegistry registry;
+    registry.state<int>("health", [] { return 80; });
+    bt::Blackboard board;
+    registry.applyTo(board);
+    EXPECT_EQ(board.get<int>("health"), 80);
+}
+
+TEST(Phase1_TreeAssembler, AssemblesCorrectStructure) {
+    bt::BehaviorBuilder builder;
+    builder.behavior("attack")
+        .when([] { return true; })
+        .onTick([] { return bt::Status::SUCCESS; });
+    builder.behavior("patrol").onTick([] { return bt::Status::SUCCESS; });
+
+    auto tree = bt::TreeAssembler::assemble(
+        std::vector<bt::BehaviorEntry>(builder.entries().begin(), builder.entries().end()));
+    EXPECT_EQ(tree.tick(), bt::Status::SUCCESS);
+}
+
+TEST(Phase1_BehaviorAction, EnterCalledOnFirstTick) {
+    int enterCount = 0;
+    int tickCount = 0;
+    bt::BehaviorBuilder builder;
+    builder.behavior("test")
+        .onEnter([&enterCount] { ++enterCount; })
+        .onTick([&tickCount] {
+            ++tickCount;
+            return bt::Status::RUNNING;
+        });
+
+    auto tree = bt::TreeAssembler::assemble(
+        std::vector<bt::BehaviorEntry>(builder.entries().begin(), builder.entries().end()));
+    std::ignore = tree.tick();
+    std::ignore = tree.tick();
+    EXPECT_EQ(enterCount, 1);   // only called once despite two ticks
+    EXPECT_EQ(tickCount, 2);
+}
+
+TEST(Phase1_BehaviorAction, ExitCalledOnCompletion) {
+    int exitCount = 0;
+    bt::BehaviorBuilder builder;
+    builder.behavior("test")
+        .onTick([] { return bt::Status::SUCCESS; })
+        .onExit([&exitCount] { ++exitCount; });
+
+    auto tree = bt::TreeAssembler::assemble(
+        std::vector<bt::BehaviorEntry>(builder.entries().begin(), builder.entries().end()));
+    std::ignore = tree.tick();
+    EXPECT_EQ(exitCount, 1);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Validator
+// ═══════════════════════════════════════════════════════════════════════════════
+
+TEST(Phase1_Validator, EmptyEntriesIsError) {
+    auto warnings = bt::Validator::validate({});
+    ASSERT_EQ(warnings.size(), 1);
+    EXPECT_TRUE(warnings[0].isError());
+}
+
+TEST(Phase1_Validator, MissingOnTickIsError) {
+    std::vector<bt::BehaviorEntry> entries;
+    entries.push_back({.name = "broken"});  // no onTick
+    auto warnings = bt::Validator::validate(entries);
+    EXPECT_TRUE(std::any_of(warnings.begin(), warnings.end(),
+                             [](const auto& warn) { return warn.isError(); }));
+}
+
+TEST(Phase1_Validator, DuplicateNameIsError) {
+    std::vector<bt::BehaviorEntry> entries;
+    entries.push_back({.name = "dup", .onTick = [] { return bt::Status::SUCCESS; }});
+    entries.push_back({.name = "dup", .onTick = [] { return bt::Status::SUCCESS; }});
+    auto warnings = bt::Validator::validate(entries);
+    EXPECT_TRUE(std::any_of(warnings.begin(), warnings.end(),
+                             [](const auto& warn) { return warn.isError(); }));
+}
+
+TEST(Phase1_Validator, NoDefaultIsWarning) {
+    std::vector<bt::BehaviorEntry> entries;
+    entries.push_back({.name = "attack",
+                        .condition = [] { return true; },
+                        .onTick = [] { return bt::Status::SUCCESS; }});
+    auto warnings = bt::Validator::validate(entries);
+    EXPECT_FALSE(warnings.empty());
+    EXPECT_FALSE(warnings[0].isError());  // warning, not error
+}
+
+TEST(Phase1_Validator, ValidRegistrationProducesNoErrors) {
+    std::vector<bt::BehaviorEntry> entries;
+    entries.push_back({.name = "attack",
+                        .condition = [] { return true; },
+                        .onTick = [] { return bt::Status::SUCCESS; }});
+    entries.push_back({.name = "patrol", .onTick = [] { return bt::Status::SUCCESS; }});
+    auto warnings = bt::Validator::validate(entries);
+    EXPECT_TRUE(std::none_of(warnings.begin(), warnings.end(),
+                              [](const auto& warn) { return warn.isError(); }));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Decision emitter
+// ═══════════════════════════════════════════════════════════════════════════════
+
+TEST(Phase1_DecisionEmitter, RecordsTickNumber) {
+    bt::DecisionEmitter emitter;
+    bt::Blackboard board;
+    emitter.record(1, "patrol", bt::Status::SUCCESS, board);
+    ASSERT_EQ(emitter.history().size(), 1);
+    EXPECT_EQ(emitter.history()[0].tickNumber, 1);
+}
+
+TEST(Phase1_DecisionEmitter, RecordsBehaviorNameAndResult) {
+    bt::DecisionEmitter emitter;
+    bt::Blackboard board;
+    emitter.record(1, "attack", bt::Status::RUNNING, board);
+    EXPECT_EQ(emitter.history()[0].behaviorName, "attack");
+    EXPECT_EQ(emitter.history()[0].result, bt::Status::RUNNING);
+}
+
+TEST(Phase1_DecisionEmitter, HistoryAccumulates) {
+    bt::DecisionEmitter emitter;
+    bt::Blackboard board;
+    emitter.record(1, "patrol", bt::Status::SUCCESS, board);
+    emitter.record(2, "attack", bt::Status::RUNNING, board);
+    emitter.record(3, "attack", bt::Status::SUCCESS, board);
+    EXPECT_EQ(emitter.history().size(), 3);
+}
+
+TEST(Phase1_DecisionEmitter, ClearResetsHistory) {
+    bt::DecisionEmitter emitter;
+    bt::Blackboard board;
+    emitter.record(1, "patrol", bt::Status::SUCCESS, board);
+    emitter.clear();
+    EXPECT_TRUE(emitter.history().empty());
+}
+
+TEST(Phase1_DecisionEmitter, BlackboardSnapshotCaptured) {
+    bt::DecisionEmitter emitter;
+    bt::Blackboard board;
+    board.set<int>("health", 75);
+    board.refresh();
+    emitter.record(1, "patrol", bt::Status::SUCCESS, board);
+    EXPECT_TRUE(emitter.history()[0].blackboardSnapshot.count("health") > 0);
+}
+
+TEST(Phase1_DecisionEmitter, IntegratesWithBehaviorTree) {
+    bt::DecisionEmitter emitter;
+    bt::BehaviorBuilder builder;
+    builder.behavior("patrol").onTick([] { return bt::Status::SUCCESS; });
+
+    auto tree = bt::TreeAssembler::assemble(
+        std::vector<bt::BehaviorEntry>(builder.entries().begin(), builder.entries().end()));
+    tree.setEmitter(&emitter);
+
+    std::ignore = tree.tick();
+    std::ignore = tree.tick();
+    EXPECT_EQ(emitter.history().size(), 2);
+    EXPECT_EQ(emitter.history()[0].tickNumber, 1);
+    EXPECT_EQ(emitter.history()[1].tickNumber, 2);
 }
