@@ -26,12 +26,14 @@ check_pkg() {
 }
 
 echo "Checking dependencies..."
-check      "cmake"      cmake
-check      "make"       make
-check      "g++"        g++
-check_pkg  "GTest"      libgtest-dev
-check_pkg  "GMock"      libgmock-dev
-check_pkg  "yaml-cpp"   libyaml-cpp-dev
+check      "cmake"         cmake
+check      "make"          make
+check      "g++"           g++
+check      "clang-tidy"    clang-tidy
+check      "clang-format"  clang-format
+check_pkg  "GTest"         libgtest-dev
+check_pkg  "GMock"         libgmock-dev
+check_pkg  "yaml-cpp"      libyaml-cpp-dev
 
 if [ ${#MISSING[@]} -eq 0 ]; then
     echo ""
@@ -43,6 +45,7 @@ echo ""
 echo "Missing: ${MISSING[*]}"
 echo "Installing..."
 sudo apt-get update -qq
-sudo apt-get install -y cmake make g++ libgtest-dev libgmock-dev libyaml-cpp-dev
+sudo apt-get install -y cmake make g++ clang-tidy clang-format \
+    libgtest-dev libgmock-dev libyaml-cpp-dev
 echo ""
 echo "Done. All dependencies installed."
