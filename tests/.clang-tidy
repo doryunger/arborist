@@ -1,0 +1,4 @@
+---
+# GTest fixtures require protected members and use underscores in fixture names.
+# These checks conflict with GTest conventions and are disabled for tests only.
+Checks: "-cppcoreguidelines-non-private-member-variables-in-classes"

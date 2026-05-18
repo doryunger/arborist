@@ -15,6 +15,7 @@ public:
         : bt::Node(std::move(nodeName)), result_(result) {}
 
     bt::Status tick() override { return result_; }
+    [[nodiscard]] std::string_view typeName() const noexcept override { return "FixedNode"; }
 
 private:
     bt::Status result_;
@@ -30,8 +31,8 @@ public:
     }
 
     void reset() override { resetCalled_ = false; }
-
     void markReset() { resetCalled_ = true; }
+    [[nodiscard]] std::string_view typeName() const noexcept override { return "ResettableNode"; }
 
 private:
     bool resetCalled_{false};
