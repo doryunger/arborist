@@ -34,7 +34,8 @@ public:
     virtual void reset() {}
 
     [[nodiscard]] std::string_view name() const noexcept { return name_; }
-    [[nodiscard]] std::uint64_t lastTickId() const noexcept { return lastTickId_; }
+    [[nodiscard]] std::uint64_t lastTickId()     const noexcept { return lastTickId_; }
+    [[nodiscard]] Status         lastStatus()    const noexcept { return lastStatus_; }
 
     // Called by BehaviorTree before each root tick so stamps are unique per tick.
     static void setCurrentTickId(std::uint64_t tickId) noexcept;
@@ -43,8 +44,9 @@ protected:
     [[nodiscard]] virtual Status doTick() = 0;
 
 private:
-    std::string name_;
+    std::string   name_;
     std::uint64_t lastTickId_{0};
+    Status        lastStatus_{Status::RUNNING};
 };
 
 }  // namespace bt

@@ -1,3 +1,4 @@
+# Build output
 build/
 .cache/
 *.o
@@ -5,10 +6,31 @@ build/
 *.so
 *.dll
 *.exe
+
+# CMake generated files (in-tree or out-of-tree)
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
+CPackConfig.cmake
+CPackSourceConfig.cmake
+CTestTestfile.cmake
 Makefile
 compile_commands.json
+
+# CTest / test discovery
+Testing/
+*_tests.cmake
+*_include.cmake
+
+# FetchContent downloaded dependencies
+_deps/
+
+# Linux executables (no extension) produced by cmake
+examples/bt_demo
+examples/bt_smoke
+tests/bt_tests
+
+# IDE / tool directories
 .vscode/
 .DS_Store
+.claude/

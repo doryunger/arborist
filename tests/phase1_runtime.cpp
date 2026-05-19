@@ -993,28 +993,23 @@ TEST(ActivePath, BehaviorTreeEmitsActivePathInTickRecord) {
     const auto& path = emitter.history()[0].activePath;
     EXPECT_FALSE(path.empty());
     // Root selector, behavior sequence, and the BehaviorAction leaf should all be present.
-    EXPECT_NE(std::find(path.begin(), path.end(), "root"), path.end());
-    EXPECT_NE(std::find(path.begin(), path.end(), "patrol"), path.end());
+    auto hasNode = [&](std::string_view nodeName) {
+        return std::any_of(path.begin(), path.end(),
+                           [&](const bt::ActiveNode& entry) { return entry.name == nodeName; });
+    };
+    EXPECT_TRUE(hasNode("root"));
+    EXPECT_TRUE(hasNode("patrol"));
 }
 
 TEST(ActivePath, ActivePathIncludesDeepNestedNodes) {
-    // Selector → Sequence(cond, action)
-    bt::Selector sel("root");
-    auto seq = std::make_unique<bt::Sequence>("seq");
-    auto* cond   = seq->addChildAndGet(makeLeaf("cond",   bt::Status::SUCCESS));
-    auto* action = seq->addChildAndGet(makeLeaf("action", bt::Status::RUNNING));
-    sel.addChild(std::move(seq));
+    auto root = std::make_unique<bt::Selector>("root");
+    auto sequence = std::make_unique<bt::Sequence>("seq");
+    sequence->addChild(makeLeaf("cond",   bt::Status::SUCCESS));
+    sequence->addChild(makeLeaf("action", bt::Status::RUNNING));
+    root->addChild(std::move(sequence));
 
     bt::DecisionEmitter emitter;
-    auto tree = bt::BehaviorTree(
-        [&]() -> std::unique_ptr<bt::Node> {
-            auto root = std::make_unique<bt::Selector>("root");
-            auto sequence = std::make_unique<bt::Sequence>("seq");
-            sequence->addChild(makeLeaf("cond",   bt::Status::SUCCESS));
-            sequence->addChild(makeLeaf("action", bt::Status::RUNNING));
-            root->addChild(std::move(sequence));
-            return root;
-        }());
+    auto tree = bt::BehaviorTree(std::move(root));
     tree.setEmitter(&emitter);
 
     std::ignore = tree.tick();
@@ -1022,10 +1017,14 @@ TEST(ActivePath, ActivePathIncludesDeepNestedNodes) {
     const auto& path = emitter.history()[0].activePath;
     // All four nodes were ticked: root, seq, cond, action
     EXPECT_EQ(path.size(), 4u);
-    EXPECT_EQ(path[0], "root");
-    EXPECT_EQ(path[1], "seq");
-    EXPECT_EQ(path[2], "cond");
-    EXPECT_EQ(path[3], "action");
+    EXPECT_EQ(path[0].name,   "root");
+    EXPECT_EQ(path[1].name,   "seq");
+    EXPECT_EQ(path[2].name,   "cond");
+    EXPECT_EQ(path[3].name,   "action");
+    EXPECT_EQ(path[0].status, bt::Status::RUNNING);  // Selector: RUNNING (child ran)
+    EXPECT_EQ(path[1].status, bt::Status::RUNNING);  // Sequence: RUNNING (action ran)
+    EXPECT_EQ(path[2].status, bt::Status::SUCCESS);  // cond: passed
+    EXPECT_EQ(path[3].status, bt::Status::RUNNING);  // action: executing
 }
 
 TEST(ActivePath, TickIdChangesEachBehaviorTreeTick) {

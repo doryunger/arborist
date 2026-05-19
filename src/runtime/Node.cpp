@@ -13,7 +13,8 @@ void Node::setCurrentTickId(std::uint64_t tickId) noexcept {
 
 Status Node::tick() {
     lastTickId_ = gCurrentTickId;
-    return doTick();
+    lastStatus_ = doTick();
+    return lastStatus_;
 }
 
 }  // namespace bt
