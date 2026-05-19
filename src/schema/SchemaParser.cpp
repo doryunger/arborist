@@ -69,10 +69,16 @@ std::unique_ptr<SchemaNode> parseNode(const YAML::Node& node) {
     } else if (typeStr == "sequence") {
         schemaNode = std::make_unique<SchemaNode>();
         schemaNode->type = SchemaNodeType::SEQUENCE;
+        if (node["name"]) {
+            schemaNode->name = node["name"].as<std::string>();
+        }
         parseChildren(node, *schemaNode);
     } else if (typeStr == "selector") {
         schemaNode = std::make_unique<SchemaNode>();
         schemaNode->type = SchemaNodeType::SELECTOR;
+        if (node["name"]) {
+            schemaNode->name = node["name"].as<std::string>();
+        }
         parseChildren(node, *schemaNode);
     } else if (typeStr == "parallel") {
         schemaNode = parseParallel(node);
