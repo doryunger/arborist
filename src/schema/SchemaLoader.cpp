@@ -4,10 +4,10 @@
 #include <unordered_set>
 #include <vector>
 
+#include "bt/Blackboard.h"
 #include "bt/RuntimeRegistry.h"
 
 #include "bt/Action.h"
-#include "bt/BehaviorEntry.h"
 #include "bt/Condition.h"
 #include "bt/Node.h"
 #include "bt/Parallel.h"
@@ -16,7 +16,6 @@
 #include "bt/SchemaParser.h"
 #include "bt/Selector.h"
 #include "bt/Sequence.h"
-#include "bt/TreeAssembler.h"
 
 namespace bt {
 
@@ -47,7 +46,8 @@ std::unique_ptr<Node> buildComposite(const SchemaNode& schema, const LoaderRegis
     } else if (schema.policy == SchemaPolicy::THRESHOLD) {
         policy = Policy::threshold(schema.threshold);
     }
-    auto par = std::make_unique<Parallel>("parallel", policy);
+    const std::string nodeName = schema.name.empty() ? "parallel" : schema.name;
+    auto par = std::make_unique<Parallel>(nodeName, policy);
     for (const auto& child : schema.children) {
         par->addChild(buildNode(*child, reg));
     }
@@ -61,14 +61,16 @@ std::unique_ptr<Node> buildNode(const SchemaNode& schema, const LoaderRegistry& 
         case SchemaNodeType::CONDITION:
             return buildCondition(schema, reg);
         case SchemaNodeType::SEQUENCE: {
-            auto seq = std::make_unique<Sequence>("sequence");
+            const std::string nodeName = schema.name.empty() ? "sequence" : schema.name;
+            auto seq = std::make_unique<Sequence>(nodeName);
             for (const auto& child : schema.children) {
                 seq->addChild(buildNode(*child, reg));
             }
             return seq;
         }
         case SchemaNodeType::SELECTOR: {
-            auto sel = std::make_unique<Selector>("selector");
+            const std::string nodeName = schema.name.empty() ? "selector" : schema.name;
+            auto sel = std::make_unique<Selector>(nodeName);
             for (const auto& child : schema.children) {
                 sel->addChild(buildNode(*child, reg));
             }
@@ -93,29 +95,28 @@ std::function<bool()> resolveCondition(const BehaviorSchema& behavior,
     return found->second;
 }
 
-BehaviorEntry buildEntry(const BehaviorSchema& behavior, const LoaderRegistry& reg) {
-    if (!behavior.tree) {
-        throw SchemaLoadError("behavior '" + behavior.name + "' has no tree");
-    }
-    BehaviorEntry entry;
-    entry.name = behavior.name;
-    entry.interruptible = behavior.interruptible;
-    entry.condition = resolveCondition(behavior, reg);
+BehaviorTree buildTree(const SchemaDoc& doc, const LoaderRegistry& reg, Blackboard blackboard = {}) {
+    auto root = std::make_unique<Selector>("root");
+    std::vector<BehaviorMeta> metas;
+    metas.reserve(doc.behaviors.size());
 
-    auto sharedNode = std::shared_ptr<Node>(buildNode(*behavior.tree, reg));
-    entry.onTick = [sharedNode]() mutable { return sharedNode->tick(); };
-    entry.onEnter = [sharedNode]() mutable { sharedNode->reset(); };
-
-    return entry;
-}
-
-BehaviorTree buildTree(const SchemaDoc& doc, const LoaderRegistry& reg) {
-    std::vector<BehaviorEntry> entries;
-    entries.reserve(doc.behaviors.size());
     for (const auto& behavior : doc.behaviors) {
-        entries.push_back(buildEntry(behavior, reg));
+        if (!behavior.tree) {
+            throw SchemaLoadError("behavior '" + behavior.name + "' has no tree");
+        }
+        auto condition = resolveCondition(behavior, reg);
+        auto seq = std::make_unique<Sequence>(behavior.name);
+        if (condition) {
+            seq->addChild(std::make_unique<Condition>(behavior.name + "_condition", condition));
+        }
+        seq->addChild(buildNode(*behavior.tree, reg));
+        root->addChild(std::move(seq));
+        metas.push_back(BehaviorMeta{.name        = behavior.name,
+                                      .condition   = condition,
+                                      .interruptible = behavior.interruptible});
     }
-    return TreeAssembler::assemble(std::move(entries));
+
+    return BehaviorTree(std::move(root), std::move(blackboard), std::move(metas));
 }
 
 void topoSort(const std::string& name,
@@ -141,40 +142,6 @@ void topoSort(const std::string& name,
     order.push_back(name);
 }
 
-SchemaDoc mergeWithSubtrees(SchemaDoc rootDoc,
-                              const std::unordered_map<std::string, SchemaDoc>& subtreeDocs,
-                              const std::vector<std::string>& order) {
-    SchemaDoc merged;
-    merged.schemaVersion = std::move(rootDoc.schemaVersion);
-    merged.stateDeclarations = std::move(rootDoc.stateDeclarations);
-
-    for (const auto& subtreeName : order) {
-        auto found = subtreeDocs.find(subtreeName);
-        if (found == subtreeDocs.end()) {
-            continue;
-        }
-        for (const auto& behavior : found->second.behaviors) {
-            BehaviorSchema copy;
-            copy.name = behavior.name;
-            copy.condition = behavior.condition;
-            copy.intent = behavior.intent;
-            copy.interruptible = behavior.interruptible;
-            if (behavior.tree) {
-                // Deep-copy not needed; we move from a local copy of the doc.
-                // Since SchemaDoc is move-only, we rebuild from the parsed doc.
-                // The subtree doc is already owned by subtreeDocs so we can't move.
-                // Re-parse isn't available here — use the existing tree by rebuilding.
-                // This is handled by the caller passing mutable subtreeDocs.
-            }
-            (void)copy;
-        }
-        break;  // unreachable — see below
-    }
-    // Cannot deep-copy SchemaNode (copy-deleted). Instead, the caller must ensure
-    // subtreeDocs is mutable and we move out of it directly.
-    return merged;
-}
-
 }  // namespace
 
 void SchemaManifest::add(std::string_view name, std::string_view yaml) {
@@ -198,7 +165,8 @@ BehaviorTree SchemaLoader::load(std::string_view yaml, const LoaderRegistry& reg
     return buildTree(doc, reg);
 }
 
-BehaviorTree SchemaLoader::load(std::string_view yaml, const RuntimeRegistry& reg) {
+BehaviorTree SchemaLoader::load(std::string_view yaml, const RuntimeRegistry& reg,
+                                 Blackboard blackboard) {
     LoaderRegistry loaderReg;
     for (const auto& action : reg.store().allActions()) {
         const auto* func = reg.findAction(action.name);
@@ -212,7 +180,8 @@ BehaviorTree SchemaLoader::load(std::string_view yaml, const RuntimeRegistry& re
             loaderReg.conditions[cond.name] = *func;
         }
     }
-    return load(yaml, loaderReg);
+    auto doc = SchemaParser::parse(yaml);
+    return buildTree(doc, loaderReg, std::move(blackboard));
 }
 
 BehaviorTree SchemaLoader::loadWithManifest(std::string_view yaml,

@@ -6,6 +6,7 @@
 #include <string_view>
 #include <unordered_map>
 
+#include "bt/Blackboard.h"
 #include "bt/BehaviorTree.h"
 #include "bt/Status.h"
 
@@ -44,7 +45,8 @@ private:
 class SchemaLoader {
 public:
     [[nodiscard]] static BehaviorTree load(std::string_view yaml, const LoaderRegistry& reg);
-    [[nodiscard]] static BehaviorTree load(std::string_view yaml, const RuntimeRegistry& reg);
+    [[nodiscard]] static BehaviorTree load(std::string_view yaml, const RuntimeRegistry& reg,
+                                            Blackboard blackboard = {});
     [[nodiscard]] static BehaviorTree loadWithManifest(std::string_view yaml,
                                                         const SchemaManifest& manifest,
                                                         const LoaderRegistry& reg);
