@@ -97,11 +97,12 @@ async function refreshHistory() {
       const updates = Object.keys(nodeIds).map(id => ({
         id, color: { background: DEFAULT_COLOR, border: '#7f849c' }
       }));
-      const path = latest.activePath || [];
-      const statusColor = STATUS_COLOR[latest.status] || DEFAULT_COLOR;
-      path.forEach(nodeId => {
-        const upd = updates.find(u => u.id === nodeId);
-        if (upd) upd.color = { background: statusColor, border: '#cdd6f4' };
+      (latest.activePath || []).forEach(entry => {
+        const upd = updates.find(u => u.id === entry.name);
+        if (upd) upd.color = {
+          background: STATUS_COLOR[entry.status] || DEFAULT_COLOR,
+          border: '#cdd6f4'
+        };
       });
       network._nodeData.update(updates);
     }
@@ -170,9 +171,11 @@ std::string serializeHistory(const DecisionEmitter& emitter) {
         out += R"(","activePath":[)";
         for (std::size_t idx = 0; idx < record.activePath.size(); ++idx) {
             if (idx > 0) { out += ','; }
-            out += '"';
-            out += record.activePath[idx];
-            out += '"';
+            out += R"({"name":")";
+            out += record.activePath[idx].name;
+            out += R"(","status":")";
+            out += statusName(record.activePath[idx].status);
+            out += R"("})";
         }
         out += R"(],"blackboard":{)";
         bool isFirstKey = true;

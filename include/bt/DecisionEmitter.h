@@ -11,13 +11,19 @@
 
 namespace bt {
 
+// One entry in the per-tick active path: which node ran and what it returned.
+struct ActiveNode {
+    std::string name;
+    Status      status{Status::RUNNING};
+};
+
 struct TickRecord {
     std::size_t tickNumber{0};
     std::string behaviorName;
     Status result{Status::FAILURE};
     std::unordered_map<std::string, std::any> blackboardSnapshot;
-    // Names of every node ticked this frame, in execution order (root → leaf).
-    std::vector<std::string> activePath;
+    // Every node ticked this frame, in execution order (root → leaf).
+    std::vector<ActiveNode> activePath;
 };
 
 // Records a structured entry for every tick. Injected into BehaviorTree
@@ -25,7 +31,7 @@ struct TickRecord {
 class DecisionEmitter {
 public:
     void record(std::size_t tickNumber, std::string behaviorName, Status result,
-                const Blackboard& blackboard, std::vector<std::string> activePath);
+                const Blackboard& blackboard, std::vector<ActiveNode> activePath);
 
     [[nodiscard]] const std::vector<TickRecord>& history() const noexcept { return history_; }
     void clear() noexcept { history_.clear(); }

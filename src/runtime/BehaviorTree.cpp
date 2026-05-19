@@ -7,11 +7,11 @@ namespace bt {
 
 namespace {
 
-void collectActivePath(const Node* node, std::uint64_t tickId, std::vector<std::string>& path) {
+void collectActivePath(const Node* node, std::uint64_t tickId, std::vector<ActiveNode>& path) {
     if (node->lastTickId() != tickId) {
         return;
     }
-    path.emplace_back(node->name());
+    path.push_back(ActiveNode{std::string(node->name()), node->lastStatus()});
     for (const auto& child : node->children()) {
         collectActivePath(child.get(), tickId, path);
     }
@@ -42,7 +42,7 @@ Status BehaviorTree::tick() {
     Status result = root_->tick();
 
     if (emitter_ != nullptr) {
-        std::vector<std::string> activePath;
+        std::vector<ActiveNode> activePath;
         collectActivePath(root_.get(), tickCount_, activePath);
         emitter_->record(tickCount_, currentBehaviorName_, result, blackboard_,
                          std::move(activePath));

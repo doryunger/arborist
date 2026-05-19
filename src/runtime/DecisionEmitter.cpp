@@ -3,7 +3,7 @@
 namespace bt {
 
 void DecisionEmitter::record(std::size_t tickNumber, std::string behaviorName, Status result,
-                              const Blackboard& blackboard, std::vector<std::string> activePath) {
+                              const Blackboard& blackboard, std::vector<ActiveNode> activePath) {
     history_.push_back(TickRecord{.tickNumber         = tickNumber,
                                    .behaviorName       = std::move(behaviorName),
                                    .result             = result,
