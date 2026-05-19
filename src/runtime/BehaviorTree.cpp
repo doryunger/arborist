@@ -56,6 +56,12 @@ Status BehaviorTree::tick() {
     return result;
 }
 
+void BehaviorTree::reset() noexcept {
+    if (root_) { root_->reset(); }
+    currentBehaviorIndex_.reset();
+    currentBehaviorName_.clear();
+}
+
 void BehaviorTree::reload(BehaviorTree next) noexcept {
     if (root_) {
         root_->reset();

@@ -15,4 +15,7 @@ namespace bt {
 //   └── [TestLeaf] patrol
 [[nodiscard]] std::string treeToString(const Node& root);
 
+// Count total nodes in the tree rooted at root (including root itself).
+[[nodiscard]] std::size_t countNodes(const Node& root);
+
 }  // namespace bt

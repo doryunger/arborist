@@ -19,9 +19,10 @@ public:
 
     [[nodiscard]] std::string_view typeName() const noexcept override { return "Parallel"; }
 
+    [[nodiscard]] const Policy& policy() const noexcept { return policy_; }
+
 protected:
     [[nodiscard]] Status doTick() override;
-    [[nodiscard]] const Policy& policy() const noexcept { return policy_; }
 
 private:
     Policy policy_;

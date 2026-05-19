@@ -43,7 +43,11 @@ public:
     [[nodiscard]] const Node& root() const noexcept { return *root_; }
     [[nodiscard]] const Blackboard& blackboard() const noexcept { return blackboard_; }
     [[nodiscard]] std::size_t tickCount() const noexcept { return tickCount_; }
+    [[nodiscard]] const std::vector<BehaviorMeta>& behaviors() const noexcept { return behaviors_; }
     void setEmitter(DecisionEmitter* emitter) noexcept { emitter_ = emitter; }
+
+    // Reset internal tick state and the node tree. Safe to call between ticks.
+    void reset() noexcept;
 
 private:
     std::unique_ptr<Node> root_;

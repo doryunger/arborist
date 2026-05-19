@@ -41,4 +41,12 @@ std::string treeToString(const Node& root) {
     return output;
 }
 
+std::size_t countNodes(const Node& root) {
+    std::size_t count = 1;
+    for (const auto& child : root.children()) {
+        count += countNodes(*child);
+    }
+    return count;
+}
+
 }  // namespace bt
