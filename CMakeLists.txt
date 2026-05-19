@@ -29,6 +29,7 @@ file(GLOB_RECURSE BT_SOURCES
     src/validation/*.cpp
     src/schema/*.cpp
     src/registry/*.cpp
+    src/simulator/*.cpp
 )
 
 if(BT_SOURCES)
