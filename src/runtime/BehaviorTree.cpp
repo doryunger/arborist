@@ -1,6 +1,23 @@
 #include "bt/BehaviorTree.h"
 
+#include <string>
+#include <vector>
+
 namespace bt {
+
+namespace {
+
+void collectActivePath(const Node* node, std::uint64_t tickId, std::vector<std::string>& path) {
+    if (node->lastTickId() != tickId) {
+        return;
+    }
+    path.emplace_back(node->name());
+    for (const auto& child : node->children()) {
+        collectActivePath(child.get(), tickId, path);
+    }
+}
+
+}  // namespace
 
 Status BehaviorTree::tick() {
     blackboard_.refresh();
@@ -21,10 +38,14 @@ Status BehaviorTree::tick() {
     }
 
     ++tickCount_;
+    Node::setCurrentTickId(tickCount_);
     Status result = root_->tick();
 
     if (emitter_ != nullptr) {
-        emitter_->record(tickCount_, currentBehaviorName_, result, blackboard_);
+        std::vector<std::string> activePath;
+        collectActivePath(root_.get(), tickCount_, activePath);
+        emitter_->record(tickCount_, currentBehaviorName_, result, blackboard_,
+                         std::move(activePath));
     }
 
     if (result != Status::RUNNING) {

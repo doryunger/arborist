@@ -19,8 +19,10 @@ public:
     Action(std::string name, Callback callback)
         : Node(std::move(name)), callback_(std::move(callback)) {}
 
-    [[nodiscard]] Status tick() override { return callback_(); }
     [[nodiscard]] std::string_view typeName() const noexcept override { return "Action"; }
+
+protected:
+    [[nodiscard]] Status doTick() override { return callback_(); }
 
 private:
     Callback callback_;

@@ -20,9 +20,11 @@ public:
           onTick_(std::move(onTick)),
           onExit_(std::move(onExit)) {}
 
-    [[nodiscard]] Status tick() override;
     void reset() override;
     [[nodiscard]] std::string_view typeName() const noexcept override { return "BehaviorAction"; }
+
+protected:
+    [[nodiscard]] Status doTick() override;
 
 private:
     std::function<void()> onEnter_;

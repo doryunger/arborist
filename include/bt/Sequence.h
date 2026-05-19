@@ -16,8 +16,10 @@ class Sequence : public CompositeNode {
 public:
     explicit Sequence(std::string name) : CompositeNode(std::move(name)) {}
 
-    [[nodiscard]] Status tick() override;
     [[nodiscard]] std::string_view typeName() const noexcept override { return "Sequence"; }
+
+protected:
+    [[nodiscard]] Status doTick() override;
 };
 
 }  // namespace bt

@@ -26,7 +26,7 @@ namespace {
 class TestLeaf final : public bt::Node {
 public:
     explicit TestLeaf(std::string name) : bt::Node(std::move(name)) {}
-    [[nodiscard]] bt::Status tick() override { return bt::Status::SUCCESS; }
+    [[nodiscard]] bt::Status doTick() override { return bt::Status::SUCCESS; }
     [[nodiscard]] std::string_view typeName() const noexcept override { return "TestLeaf"; }
 };
 }  // namespace
@@ -41,17 +41,17 @@ TEST(Phase5_MonitorQuery, EmptyHistoryReturnsEmpty) {
 
 TEST(Phase5_MonitorQuery, AllReturnsFullHistory) {
     bt::DecisionEmitter emitter;
-    emitter.record(1, "attack", bt::Status::RUNNING, emptyBoard());
-    emitter.record(2, "patrol", bt::Status::SUCCESS, emptyBoard());
+    emitter.record(1, "attack", bt::Status::RUNNING, emptyBoard(), {});
+    emitter.record(2, "patrol", bt::Status::SUCCESS, emptyBoard(), {});
     bt::MonitorQuery query(emitter);
     EXPECT_EQ(query.all().size(), 2u);
 }
 
 TEST(Phase5_MonitorQuery, FilterByBehaviorName) {
     bt::DecisionEmitter emitter;
-    emitter.record(1, "attack", bt::Status::RUNNING, emptyBoard());
-    emitter.record(2, "patrol", bt::Status::SUCCESS, emptyBoard());
-    emitter.record(3, "attack", bt::Status::SUCCESS, emptyBoard());
+    emitter.record(1, "attack", bt::Status::RUNNING, emptyBoard(), {});
+    emitter.record(2, "patrol", bt::Status::SUCCESS, emptyBoard(), {});
+    emitter.record(3, "attack", bt::Status::SUCCESS, emptyBoard(), {});
     bt::MonitorQuery query(emitter);
     bt::QueryFilter filter;
     filter.behaviorName = "attack";
@@ -63,9 +63,9 @@ TEST(Phase5_MonitorQuery, FilterByBehaviorName) {
 
 TEST(Phase5_MonitorQuery, FilterByStatus) {
     bt::DecisionEmitter emitter;
-    emitter.record(1, "attack", bt::Status::RUNNING, emptyBoard());
-    emitter.record(2, "patrol", bt::Status::SUCCESS, emptyBoard());
-    emitter.record(3, "attack", bt::Status::FAILURE, emptyBoard());
+    emitter.record(1, "attack", bt::Status::RUNNING, emptyBoard(), {});
+    emitter.record(2, "patrol", bt::Status::SUCCESS, emptyBoard(), {});
+    emitter.record(3, "attack", bt::Status::FAILURE, emptyBoard(), {});
     bt::MonitorQuery query(emitter);
     bt::QueryFilter filter;
     filter.status = bt::Status::SUCCESS;
@@ -77,7 +77,7 @@ TEST(Phase5_MonitorQuery, FilterByStatus) {
 TEST(Phase5_MonitorQuery, FilterByTickRange) {
     bt::DecisionEmitter emitter;
     for (std::size_t idx = 1; idx <= 5; ++idx) {
-        emitter.record(idx, "action", bt::Status::RUNNING, emptyBoard());
+        emitter.record(idx, "action", bt::Status::RUNNING, emptyBoard(), {});
     }
     bt::MonitorQuery query(emitter);
     bt::QueryFilter filter;
@@ -91,9 +91,9 @@ TEST(Phase5_MonitorQuery, FilterByTickRange) {
 
 TEST(Phase5_MonitorQuery, FilterCombinesBehaviorNameAndStatus) {
     bt::DecisionEmitter emitter;
-    emitter.record(1, "attack", bt::Status::RUNNING, emptyBoard());
-    emitter.record(2, "attack", bt::Status::SUCCESS, emptyBoard());
-    emitter.record(3, "patrol", bt::Status::SUCCESS, emptyBoard());
+    emitter.record(1, "attack", bt::Status::RUNNING, emptyBoard(), {});
+    emitter.record(2, "attack", bt::Status::SUCCESS, emptyBoard(), {});
+    emitter.record(3, "patrol", bt::Status::SUCCESS, emptyBoard(), {});
     bt::MonitorQuery query(emitter);
     bt::QueryFilter filter;
     filter.behaviorName = "attack";
@@ -106,7 +106,7 @@ TEST(Phase5_MonitorQuery, FilterCombinesBehaviorNameAndStatus) {
 TEST(Phase5_MonitorQuery, DefaultTickRangeMatchesAll) {
     bt::DecisionEmitter emitter;
     for (std::size_t idx = 1; idx <= 10; ++idx) {
-        emitter.record(idx, "x", bt::Status::RUNNING, emptyBoard());
+        emitter.record(idx, "x", bt::Status::RUNNING, emptyBoard(), {});
     }
     bt::MonitorQuery query(emitter);
     EXPECT_EQ(query.filter({}).size(), 10u);
@@ -293,7 +293,7 @@ TEST(Phase5_MonitorServer, HistoryEndpointReturnsJsonArray) {
     auto root = std::make_unique<bt::Selector>("root");
     bt::BehaviorTree tree(std::move(root));
     bt::DecisionEmitter emitter;
-    emitter.record(1, "attack", bt::Status::SUCCESS, emptyBoard());
+    emitter.record(1, "attack", bt::Status::SUCCESS, emptyBoard(), {});
     bt::MonitorServer server(tree, emitter);
     server.start(18084);
 

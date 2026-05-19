@@ -2,7 +2,7 @@
 
 namespace bt {
 
-Status Selector::tick() {
+Status Selector::doTick() {
     while (currentChildIndex() < children().size()) {
         Status status = children()[currentChildIndex()]->tick();
         if (status == Status::RUNNING) {
