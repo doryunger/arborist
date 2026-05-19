@@ -1,8 +1,10 @@
 #pragma once
 
+#include <cstddef>
 #include <string>
 
 #include "bt/Node.h"
+#include "bt/SchemaNode.h"
 
 namespace bt {
 
@@ -15,7 +17,10 @@ namespace bt {
 //   └── [TestLeaf] patrol
 [[nodiscard]] std::string treeToString(const Node& root);
 
-// Count total nodes in the tree rooted at root (including root itself).
+// Count total nodes in the live tree rooted at root (including root itself).
 [[nodiscard]] std::size_t countNodes(const Node& root);
+
+// Count total nodes in a schema tree (before building live nodes).
+[[nodiscard]] std::size_t countSchemaNodes(const SchemaNode& root);
 
 }  // namespace bt

@@ -35,6 +35,8 @@ struct SchemaNode {
     SchemaNode& operator=(const SchemaNode&) = delete;
     SchemaNode(SchemaNode&&) = default;
     SchemaNode& operator=(SchemaNode&&) = default;
+
+    [[nodiscard]] std::unique_ptr<SchemaNode> deepClone() const;
 };
 
 struct StateDeclaration {

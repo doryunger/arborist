@@ -1,0 +1,2 @@
+add_executable(bt_benchmark benchmark.cpp)
+target_link_libraries(bt_benchmark PRIVATE bt_framework)

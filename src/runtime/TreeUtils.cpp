@@ -1,5 +1,6 @@
 #include "bt/TreeUtils.h"
 
+#include <cstddef>
 #include <string>
 
 namespace bt {
@@ -45,6 +46,14 @@ std::size_t countNodes(const Node& root) {
     std::size_t count = 1;
     for (const auto& child : root.children()) {
         count += countNodes(*child);
+    }
+    return count;
+}
+
+std::size_t countSchemaNodes(const SchemaNode& root) {
+    std::size_t count = 1;
+    for (const auto& child : root.children) {
+        count += countSchemaNodes(*child);
     }
     return count;
 }

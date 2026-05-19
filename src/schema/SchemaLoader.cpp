@@ -9,6 +9,7 @@
 
 #include "bt/Action.h"
 #include "bt/Condition.h"
+#include "bt/LazySubtree.h"
 #include "bt/Node.h"
 #include "bt/Parallel.h"
 #include "bt/PartitionConfig.h"
@@ -114,10 +115,27 @@ BehaviorTree buildTree(const SchemaDoc& doc, const LoaderRegistry& reg,
         if (condition) {
             seq->addChild(std::make_unique<Condition>(behavior.name + "_condition", condition));
         }
-        auto subtree = buildNode(*behavior.tree, reg);
-        if (partition.autoPartition && countNodes(*subtree) > partition.maxNodesPerScope) {
-            subtree = std::make_unique<SubtreeScope>(behavior.name + "_scope",
-                                                     std::move(subtree));
+        const std::size_t subtreeNodeCount =
+            (partition.lazyThreshold > 0 || partition.autoPartition)
+                ? countSchemaNodes(*behavior.tree)
+                : 0U;
+
+        std::unique_ptr<Node> subtree;
+        if (partition.lazyThreshold > 0 && subtreeNodeCount > partition.lazyThreshold) {
+            // Defer instantiation: capture a shared deep clone + registry copy.
+            // shared_ptr is required because std::function demands a copyable functor.
+            auto cloned = std::shared_ptr<SchemaNode>(behavior.tree->deepClone().release());
+            subtree = std::make_unique<LazySubtree>(
+                behavior.name + "_lazy",
+                [schema = std::move(cloned), regCopy = reg]() {
+                    return buildNode(*schema, regCopy);
+                });
+        } else {
+            subtree = buildNode(*behavior.tree, reg);
+            if (partition.autoPartition && subtreeNodeCount > partition.maxNodesPerScope) {
+                subtree = std::make_unique<SubtreeScope>(behavior.name + "_scope",
+                                                         std::move(subtree));
+            }
         }
         seq->addChild(std::move(subtree));
         root->addChild(std::move(seq));
