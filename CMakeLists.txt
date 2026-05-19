@@ -21,6 +21,16 @@ endif()
 # ── Dependencies ──────────────────────────────────────────────────────────────
 find_package(yaml-cpp REQUIRED)
 find_package(SQLite3 REQUIRED)
+find_package(Threads REQUIRED)
+
+include(FetchContent)
+FetchContent_Declare(
+    httplib
+    GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
+    GIT_TAG        v0.18.1
+)
+set(HTTPLIB_COMPILE OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(httplib)
 
 # ── Library ───────────────────────────────────────────────────────────────────
 file(GLOB_RECURSE BT_SOURCES
@@ -30,12 +40,14 @@ file(GLOB_RECURSE BT_SOURCES
     src/schema/*.cpp
     src/registry/*.cpp
     src/simulator/*.cpp
+    src/monitor/*.cpp
 )
 
 if(BT_SOURCES)
     add_library(bt_framework ${BT_SOURCES})
     target_include_directories(bt_framework PUBLIC include)
     target_link_libraries(bt_framework PUBLIC yaml-cpp SQLite::SQLite3)
+    target_link_libraries(bt_framework PRIVATE httplib::httplib Threads::Threads)
 else()
     add_library(bt_framework INTERFACE)
     target_include_directories(bt_framework INTERFACE include)
@@ -66,3 +78,4 @@ endif()
 # ── Tests ─────────────────────────────────────────────────────────────────────
 enable_testing()
 add_subdirectory(tests)
+add_subdirectory(examples)
