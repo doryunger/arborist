@@ -2,7 +2,7 @@
 
 namespace bt {
 
-Status BehaviorAction::tick() {
+Status BehaviorAction::doTick() {
     if (!entered_) {
         if (onEnter_) {
             onEnter_();

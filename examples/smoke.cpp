@@ -116,7 +116,7 @@ int main() {
     for (const auto& record : result.history) {
         // Replay history into a fresh emitter so the server can serve it
         bt::Blackboard board;
-        emitter.record(record.tickNumber, record.behaviorName, record.result, board);
+        emitter.record(record.tickNumber, record.behaviorName, record.result, board, record.activePath);
     }
 
     bt::MonitorServer server(serverTree, emitter);

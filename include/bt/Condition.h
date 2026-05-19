@@ -19,10 +19,12 @@ public:
     Condition(std::string name, Predicate predicate)
         : Node(std::move(name)), predicate_(std::move(predicate)) {}
 
-    [[nodiscard]] Status tick() override {
+    [[nodiscard]] std::string_view typeName() const noexcept override { return "Condition"; }
+
+protected:
+    [[nodiscard]] Status doTick() override {
         return predicate_() ? Status::SUCCESS : Status::FAILURE;
     }
-    [[nodiscard]] std::string_view typeName() const noexcept override { return "Condition"; }
 
 private:
     Predicate predicate_;

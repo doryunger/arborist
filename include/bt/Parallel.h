@@ -17,8 +17,10 @@ public:
     explicit Parallel(std::string name, Policy policy = Policy::all())
         : CompositeNode(std::move(name)), policy_(policy) {}
 
-    [[nodiscard]] Status tick() override;
     [[nodiscard]] std::string_view typeName() const noexcept override { return "Parallel"; }
+
+protected:
+    [[nodiscard]] Status doTick() override;
     [[nodiscard]] const Policy& policy() const noexcept { return policy_; }
 
 private:

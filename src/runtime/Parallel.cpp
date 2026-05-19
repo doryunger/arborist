@@ -2,7 +2,7 @@
 
 namespace bt {
 
-Status Parallel::tick() {
+Status Parallel::doTick() {
     std::size_t successCount = 0;
     std::size_t failureCount = 0;
     const std::size_t total = children().size();

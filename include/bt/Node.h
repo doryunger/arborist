@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <span>
 #include <string>
@@ -20,7 +21,11 @@ public:
     Node(Node&&) = delete;
     Node& operator=(Node&&) = delete;
 
-    [[nodiscard]] virtual Status tick() = 0;
+    // Non-virtual: stamps lastTickId_ then delegates to doTick().
+    // BehaviorTree calls setCurrentTickId() before ticking the root so every
+    // node that participates in a tick gets stamped with the same ID.
+    [[nodiscard]] Status tick();
+
     [[nodiscard]] virtual std::string_view typeName() const noexcept = 0;
     [[nodiscard]] virtual std::span<const std::unique_ptr<Node>> children() const noexcept {
         return {};
@@ -29,9 +34,17 @@ public:
     virtual void reset() {}
 
     [[nodiscard]] std::string_view name() const noexcept { return name_; }
+    [[nodiscard]] std::uint64_t lastTickId() const noexcept { return lastTickId_; }
+
+    // Called by BehaviorTree before each root tick so stamps are unique per tick.
+    static void setCurrentTickId(std::uint64_t tickId) noexcept;
+
+protected:
+    [[nodiscard]] virtual Status doTick() = 0;
 
 private:
     std::string name_;
+    std::uint64_t lastTickId_{0};
 };
 
 }  // namespace bt

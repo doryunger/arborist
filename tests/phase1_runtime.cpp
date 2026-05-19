@@ -36,7 +36,7 @@ public:
     explicit FixedNode(std::string nodeName, bt::Status result)
         : bt::Node(std::move(nodeName)), result_(result) {}
 
-    bt::Status tick() override { return result_; }
+    bt::Status doTick() override { return result_; }
     [[nodiscard]] std::string_view typeName() const noexcept override { return "FixedNode"; }
 
 private:
@@ -47,7 +47,7 @@ class ResettableNode : public bt::Node {
 public:
     explicit ResettableNode() : bt::Node("resettable") {}
 
-    bt::Status tick() override {
+    bt::Status doTick() override {
         return resetCalled_ ? bt::Status::SUCCESS : bt::Status::RUNNING;
     }
 
@@ -69,7 +69,7 @@ public:
     explicit ControllableNode(std::string nodeName, bt::Status initial = bt::Status::FAILURE)
         : bt::Node(std::move(nodeName)), status_(initial) {}
 
-    bt::Status tick() override {
+    bt::Status doTick() override {
         ++tickCount_;
         return status_;
     }
@@ -876,7 +876,7 @@ TEST(Phase1_Validator, ValidRegistrationProducesNoErrors) {
 TEST(Phase1_DecisionEmitter, RecordsTickNumber) {
     bt::DecisionEmitter emitter;
     bt::Blackboard board;
-    emitter.record(1, "patrol", bt::Status::SUCCESS, board);
+    emitter.record(1, "patrol", bt::Status::SUCCESS, board, {});
     ASSERT_EQ(emitter.history().size(), 1);
     EXPECT_EQ(emitter.history()[0].tickNumber, 1);
 }
@@ -884,7 +884,7 @@ TEST(Phase1_DecisionEmitter, RecordsTickNumber) {
 TEST(Phase1_DecisionEmitter, RecordsBehaviorNameAndResult) {
     bt::DecisionEmitter emitter;
     bt::Blackboard board;
-    emitter.record(1, "attack", bt::Status::RUNNING, board);
+    emitter.record(1, "attack", bt::Status::RUNNING, board, {});
     EXPECT_EQ(emitter.history()[0].behaviorName, "attack");
     EXPECT_EQ(emitter.history()[0].result, bt::Status::RUNNING);
 }
@@ -892,16 +892,16 @@ TEST(Phase1_DecisionEmitter, RecordsBehaviorNameAndResult) {
 TEST(Phase1_DecisionEmitter, HistoryAccumulates) {
     bt::DecisionEmitter emitter;
     bt::Blackboard board;
-    emitter.record(1, "patrol", bt::Status::SUCCESS, board);
-    emitter.record(2, "attack", bt::Status::RUNNING, board);
-    emitter.record(3, "attack", bt::Status::SUCCESS, board);
+    emitter.record(1, "patrol", bt::Status::SUCCESS, board, {});
+    emitter.record(2, "attack", bt::Status::RUNNING, board, {});
+    emitter.record(3, "attack", bt::Status::SUCCESS, board, {});
     EXPECT_EQ(emitter.history().size(), 3);
 }
 
 TEST(Phase1_DecisionEmitter, ClearResetsHistory) {
     bt::DecisionEmitter emitter;
     bt::Blackboard board;
-    emitter.record(1, "patrol", bt::Status::SUCCESS, board);
+    emitter.record(1, "patrol", bt::Status::SUCCESS, board, {});
     emitter.clear();
     EXPECT_TRUE(emitter.history().empty());
 }
@@ -911,7 +911,7 @@ TEST(Phase1_DecisionEmitter, BlackboardSnapshotCaptured) {
     bt::Blackboard board;
     board.set<int>("health", 75);
     board.refresh();
-    emitter.record(1, "patrol", bt::Status::SUCCESS, board);
+    emitter.record(1, "patrol", bt::Status::SUCCESS, board, {});
     EXPECT_TRUE(emitter.history()[0].blackboardSnapshot.count("health") > 0);
 }
 
@@ -929,4 +929,112 @@ TEST(Phase1_DecisionEmitter, IntegratesWithBehaviorTree) {
     EXPECT_EQ(emitter.history().size(), 2);
     EXPECT_EQ(emitter.history()[0].tickNumber, 1);
     EXPECT_EQ(emitter.history()[1].tickNumber, 2);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Active-path tracking
+// ═══════════════════════════════════════════════════════════════════════════════
+
+TEST(ActivePath, LeafNodeStampedOnTick) {
+    auto leaf = std::make_unique<ControllableNode>("leaf", bt::Status::SUCCESS);
+    bt::Node::setCurrentTickId(1);
+    std::ignore = leaf->tick();
+    EXPECT_EQ(leaf->lastTickId(), 1u);
+}
+
+TEST(ActivePath, UntickedNodeHasZeroStamp) {
+    ControllableNode leaf("leaf", bt::Status::SUCCESS);
+    EXPECT_EQ(leaf.lastTickId(), 0u);
+}
+
+TEST(ActivePath, SequenceStampsAllTickedNodes) {
+    bt::Sequence seq("seq");
+    auto* first  = seq.addChildAndGet(makeLeaf("a", bt::Status::SUCCESS));
+    auto* second = seq.addChildAndGet(makeLeaf("b", bt::Status::SUCCESS));
+    bt::Node::setCurrentTickId(7);
+    std::ignore = seq.tick();
+    EXPECT_EQ(seq.lastTickId(),    7u);
+    EXPECT_EQ(first->lastTickId(), 7u);
+    EXPECT_EQ(second->lastTickId(), 7u);
+}
+
+TEST(ActivePath, SequenceDoesNotStampSkippedNodes) {
+    bt::Sequence seq("seq");
+    auto* first  = seq.addChildAndGet(makeLeaf("a", bt::Status::FAILURE));
+    auto* second = seq.addChildAndGet(makeLeaf("b", bt::Status::SUCCESS));
+    bt::Node::setCurrentTickId(3);
+    std::ignore = seq.tick();
+    EXPECT_EQ(first->lastTickId(),  3u);  // was ticked — failed
+    EXPECT_EQ(second->lastTickId(), 0u);  // was skipped — not stamped
+}
+
+TEST(ActivePath, SelectorStampsOnlyTriedNodes) {
+    bt::Selector sel("sel");
+    auto* first  = sel.addChildAndGet(makeLeaf("a", bt::Status::FAILURE));
+    auto* second = sel.addChildAndGet(makeLeaf("b", bt::Status::SUCCESS));
+    auto* third  = sel.addChildAndGet(makeLeaf("c", bt::Status::SUCCESS));
+    bt::Node::setCurrentTickId(5);
+    std::ignore = sel.tick();
+    EXPECT_EQ(first->lastTickId(),  5u);
+    EXPECT_EQ(second->lastTickId(), 5u);
+    EXPECT_EQ(third->lastTickId(),  0u);  // selector short-circuits on second SUCCESS
+}
+
+TEST(ActivePath, BehaviorTreeEmitsActivePathInTickRecord) {
+    bt::DecisionEmitter emitter;
+    bt::BehaviorBuilder builder;
+    builder.behavior("patrol").onTick([] { return bt::Status::RUNNING; });
+    auto tree = bt::TreeAssembler::assemble(
+        std::vector<bt::BehaviorEntry>(builder.entries().begin(), builder.entries().end()));
+    tree.setEmitter(&emitter);
+
+    std::ignore = tree.tick();
+    ASSERT_EQ(emitter.history().size(), 1u);
+    const auto& path = emitter.history()[0].activePath;
+    EXPECT_FALSE(path.empty());
+    // Root selector, behavior sequence, and the BehaviorAction leaf should all be present.
+    EXPECT_NE(std::find(path.begin(), path.end(), "root"), path.end());
+    EXPECT_NE(std::find(path.begin(), path.end(), "patrol"), path.end());
+}
+
+TEST(ActivePath, ActivePathIncludesDeepNestedNodes) {
+    // Selector → Sequence(cond, action)
+    bt::Selector sel("root");
+    auto seq = std::make_unique<bt::Sequence>("seq");
+    auto* cond   = seq->addChildAndGet(makeLeaf("cond",   bt::Status::SUCCESS));
+    auto* action = seq->addChildAndGet(makeLeaf("action", bt::Status::RUNNING));
+    sel.addChild(std::move(seq));
+
+    bt::DecisionEmitter emitter;
+    auto tree = bt::BehaviorTree(
+        [&]() -> std::unique_ptr<bt::Node> {
+            auto root = std::make_unique<bt::Selector>("root");
+            auto sequence = std::make_unique<bt::Sequence>("seq");
+            sequence->addChild(makeLeaf("cond",   bt::Status::SUCCESS));
+            sequence->addChild(makeLeaf("action", bt::Status::RUNNING));
+            root->addChild(std::move(sequence));
+            return root;
+        }());
+    tree.setEmitter(&emitter);
+
+    std::ignore = tree.tick();
+    ASSERT_EQ(emitter.history().size(), 1u);
+    const auto& path = emitter.history()[0].activePath;
+    // All four nodes were ticked: root, seq, cond, action
+    EXPECT_EQ(path.size(), 4u);
+    EXPECT_EQ(path[0], "root");
+    EXPECT_EQ(path[1], "seq");
+    EXPECT_EQ(path[2], "cond");
+    EXPECT_EQ(path[3], "action");
+}
+
+TEST(ActivePath, TickIdChangesEachBehaviorTreeTick) {
+    ControllableNode leaf("leaf", bt::Status::RUNNING);
+    bt::Node::setCurrentTickId(10);
+    std::ignore = leaf.tick();
+    EXPECT_EQ(leaf.lastTickId(), 10u);
+
+    bt::Node::setCurrentTickId(11);
+    std::ignore = leaf.tick();
+    EXPECT_EQ(leaf.lastTickId(), 11u);
 }

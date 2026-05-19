@@ -2,7 +2,7 @@
 
 namespace bt {
 
-Status Sequence::tick() {
+Status Sequence::doTick() {
     while (currentChildIndex() < children().size()) {
         Status status = children()[currentChildIndex()]->tick();
         if (status == Status::RUNNING) {

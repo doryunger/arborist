@@ -97,10 +97,12 @@ async function refreshHistory() {
       const updates = Object.keys(nodeIds).map(id => ({
         id, color: { background: DEFAULT_COLOR, border: '#7f849c' }
       }));
-      if (latest.behavior) {
-        const active = updates.find(u => u.id === latest.behavior + '_action' || u.id === latest.behavior);
-        if (active) active.color = { background: STATUS_COLOR[latest.status] || DEFAULT_COLOR, border: '#cdd6f4' };
-      }
+      const path = latest.activePath || [];
+      const statusColor = STATUS_COLOR[latest.status] || DEFAULT_COLOR;
+      path.forEach(nodeId => {
+        const upd = updates.find(u => u.id === nodeId);
+        if (upd) upd.color = { background: statusColor, border: '#cdd6f4' };
+      });
       network._nodeData.update(updates);
     }
     const list = document.getElementById('history-list');
@@ -165,7 +167,14 @@ std::string serializeHistory(const DecisionEmitter& emitter) {
         out += record.behaviorName;
         out += R"(","status":")";
         out += statusName(record.result);
-        out += R"(","blackboard":{)";
+        out += R"(","activePath":[)";
+        for (std::size_t idx = 0; idx < record.activePath.size(); ++idx) {
+            if (idx > 0) { out += ','; }
+            out += '"';
+            out += record.activePath[idx];
+            out += '"';
+        }
+        out += R"(],"blackboard":{)";
         bool isFirstKey = true;
         for (const auto& [key, val] : record.blackboardSnapshot) {
             if (!isFirstKey) { out += ','; }
