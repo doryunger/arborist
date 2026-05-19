@@ -2,6 +2,8 @@
 
 A game-engine-agnostic framework for authoring, executing, monitoring, and automatically testing AI behavior trees. The framework owns the full decision-making pipeline from authoring to analysis; the game engine is reduced to a state provider and command executor.
 
+This is a working concept built to validate the architecture. All described capabilities are implemented, tested (261 passing tests), and benchmarked. The limitations section is honest about what is not yet built and what requires design work before production adoption.
+
 ---
 
 ## The Problem
@@ -62,6 +64,8 @@ When the runtime starts, a contract validator cross-references these declaration
 
 The separation between declaration (what this behavior does) and implementation (how it does it) means a designer can plan an AI's full behavior set, including its data dependencies, before a single line of C++ is written.
 
+The SQLite store is also the foundation for the planned visual editor. Because every behavior, condition, action, and blackboard dependency is already declared in structured form, an editor can read and write the full AI graph without touching source files or the game runtime.
+
 ---
 
 ## The Blackboard
@@ -70,7 +74,7 @@ The Blackboard is the framework's read-only view of world state. Before each tic
 
 This design eliminates an entire class of bugs common in hand-crafted AI: the condition that was true at the start of a frame but false by the time the action reads it. Within a single tick, the world is frozen from the framework's perspective.
 
-The Blackboard also feeds the decision history. Every tick record includes a full snapshot of the blackboard at the time of decision, so replaying or reviewing AI behavior includes the exact state that drove each choice.
+The Blackboard also feeds the decision history. Every tick record optionally includes a full snapshot of the blackboard at the time of decision, so replaying or reviewing AI behavior includes the exact state that drove each choice. Snapshot capture is opt-in; in production builds it is disabled to avoid the memory cost described in the performance section below.
 
 ---
 
@@ -124,11 +128,33 @@ This is how specific bugs are locked in as non-regressions: reproduce the scenar
 
 ---
 
-## Auto-Partitioning
+## Auto-Partitioning and Lazy Loading
 
 When a behavior's subtree grows beyond a configurable node count, Arborist automatically wraps it in a scope boundary at load time. From the outside this is completely transparent — the behavior ticks identically, produces the same results, and appears the same in the YAML. Internally, the scope boundary isolates that subtree for monitoring and testing purposes.
 
-In the live viewer, scope boundaries appear as distinct sections of the graph rather than one undifferentiated mass of nodes. In the path explorer, scoped subtrees can be targeted and tested in isolation. The partition threshold is configurable; the framework applies it silently and reports the partitioning in the analyzer output.
+Beyond partitioning, Arborist supports lazy subtree instantiation. When the lazy threshold is configured, large subtrees are not built at load time at all — the schema is stored as data and the live node objects are constructed only the first time evaluation reaches that subtree. This is analogous to demand paging: the full tree exists as a description at all times, but only the parts the current execution path actually reaches are materialized in memory. The benchmark shows this is measurably faster than eager construction in scenarios where many behaviors are never activated in a given session.
+
+---
+
+## Performance
+
+The framework includes a large-scale benchmark that synthesizes agent populations, ticks them for realistic durations, and measures throughput across configurations. Results below are from a single-threaded run of 200 agents × 3600 ticks (720,000 total ticks).
+
+| Scenario | Throughput | Per-tick latency | Memory delta |
+|---|---|---|---|
+| Small tree, no emitter | 554K ticks/s | 1.8 µs | — |
+| Small tree, ring-buffer emitter, no snapshot | 115K ticks/s | 8.6 µs | ~2MB |
+| Medium tree, no emitter | 255K ticks/s | 3.9 µs | — |
+| Medium tree, lazy partition, no emitter | 305K ticks/s | 3.3 µs | — |
+| Large tree, no emitter | 141K ticks/s | 7.1 µs | — |
+| Large tree, unbounded emitter, full snapshot | 63K ticks/s | 15.7 µs | **736MB** |
+| Large tree, ring-buffer emitter (cap 20), no snapshot | 53K ticks/s | 18.9 µs | — |
+
+**What these numbers mean in practice.** A game with 500 agents ticking at 10Hz needs 5,000 ticks per second. Even the slowest configuration above (53K ticks/s) provides more than 10× headroom for that workload. AI is also never uniform across agents — most games stagger AI updates so that not every agent ticks on every frame, which multiplies the effective budget further.
+
+**The memory trap.** The row that stands out is the unbounded emitter with full blackboard snapshots: 736MB of heap growth over the 20-minute simulation. This is not a theoretical risk — it is what happens in a naive integration if history is left unbounded and snapshot capture is not disabled in production builds. The ring buffer and opt-in snapshot flags exist specifically to prevent this; using them brings memory growth to near zero.
+
+**Where the ceiling is.** At AAA open-world scale — thousands of streaming agents, 60fps, multi-threaded job systems — this framework would hit limits. Each node dispatch goes through a `std::function` call (~5–15ns), the blackboard uses `std::any` for type erasure, and the entire tick loop is single-threaded. These are not accidental constraints; they are design tradeoffs that prioritize correctness and observability. Eliminating them would require a data-oriented rewrite and is tracked as a future direction.
 
 ---
 
@@ -138,14 +164,20 @@ In the live viewer, scope boundaries appear as distinct sections of the graph ra
 - Trees reload at runtime without restarting the process
 - All condition and action implementations live in C++; YAML is pure structure
 - Decision history — which behavior ran, which nodes were evaluated, full blackboard snapshot — is recorded for every tick
+- Ring-buffer history with configurable capacity prevents unbounded memory growth
+- Blackboard snapshot capture is opt-in; disabled in production to eliminate allocation overhead
+- Lazy subtree instantiation defers building node trees until first use
 - Every behavior can be regression-tested without an engine
 - Logic errors surface at load time, not during gameplay
 - Large trees are automatically partitioned into manageable scopes
 - Live browser viewer shows exactly which nodes ran and with what result
+- SQLite contract store is the foundation for a future visual editor
 
 ---
 
 ## Limitations
+
+**Single-threaded.** The tick loop is not thread-safe. In engines that run AI across worker threads, each thread must own a separate tree instance. Agent-to-thread partitioning is the responsibility of the integration layer, not the framework.
 
 **Conditions are boolean.** The YAML references named conditions by name; those conditions return true or false. Numeric comparisons, range checks, or multi-variable expressions belong in C++ lambdas. The schema cannot express "fire when health is below 30 and distance is less than 5" directly — that logic must be wrapped in a named condition.
 
@@ -157,7 +189,23 @@ In the live viewer, scope boundaries appear as distinct sections of the graph ra
 
 **RUNNING state belongs to the action.** When an action returns Running across multiple ticks, the framework resumes it correctly, but the action itself is responsible for managing its own in-progress state. The framework does not persist state for actions between ticks — it only preserves the position in the tree.
 
-**No built-in visual editor.** Trees are authored in YAML. A visual graph editor backed by the schema serializer is a planned capability for the engine adapter phase.
+**No built-in visual editor.** Trees are authored in YAML. A visual graph editor backed by the schema serializer and SQLite contract store is planned for the next development phase.
+
+---
+
+## Roadmap
+
+The framework is complete through the authoring, execution, analysis, and testing layers. The following capabilities are planned and the architecture is designed to accommodate them.
+
+**Engine adapter.** A thin integration layer that connects Arborist to a specific engine's entity system, update loop, and job scheduler. The adapter is the only engine-specific code; everything above it is portable.
+
+**Visual editor.** A graph-based behavior authoring tool backed by the SQLite contract store. Because all behaviors, conditions, and blackboard dependencies are already declared in structured form, the editor reads and writes the same data the runtime uses — no separate representation.
+
+**Multi-threaded ticking.** The internal tick counter and blackboard would need redesign to support safe parallel evaluation across agents. The contract and schema layers are already stateless and require no changes.
+
+**Decorator nodes.** Wrappers that modify a child's result without replacing it — inverters, retry limits, cooldowns, and probability gates. These are structural additions to the node hierarchy and do not affect existing trees.
+
+**Recursive auto-partitioning.** Currently the partition boundary is placed at the root of an oversized subtree. A future version would subdivide recursively, placing scope boundaries at the deepest hot spots within a behavior rather than at its entry point.
 
 ---
 
@@ -166,14 +214,15 @@ In the live viewer, scope boundaries appear as distinct sections of the graph ra
 ```
 include/bt/       Public API headers
 src/runtime/      Core execution: Node, BehaviorTree, Blackboard, all node types
-src/schema/       YAML parsing and tree assembly
+src/schema/       YAML parsing, tree assembly, SchemaNode deep clone
 src/registry/     SQLite contract store and validator
 src/harness/      ScenarioRunner, PathExplorer (automated testing)
-src/analysis/     ComplexityAnalyzer, SubtreeScope (logic analysis and partitioning)
+src/analysis/     ComplexityAnalyzer, SubtreeScope, LazySubtree
 src/monitor/      Embedded HTTP server and browser viewer
 src/simulator/    MockEngine, headless Simulator
 src/builder/      Code-first tree builder API
-tests/            Phase test files (phase0 through phase7)
+tests/            Phase test files (phase0 through phase8)
+benchmarks/       Large-scale throughput benchmark (200 agents × 3600 ticks)
 examples/         NPC guard demo, pipeline smoke test
 docs/             Full design plan and resolved decisions
 ```
@@ -188,6 +237,13 @@ Requires CMake 3.20 or later and a C++20 compiler. Dependencies are fetched auto
 cmake -B build
 cmake --build build -j$(nproc)
 cd build && ctest --output-on-failure
+```
+
+Run the large-scale benchmark:
+
+```bash
+./build/benchmarks/bt_benchmark
+# Optional: ./build/benchmarks/bt_benchmark 500 7200  (500 agents, 7200 ticks each)
 ```
 
 Run the included NPC demo and open `http://localhost:8080` to see the live tree viewer:
