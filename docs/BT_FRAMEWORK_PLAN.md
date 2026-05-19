@@ -173,9 +173,10 @@ is caught here, not at load time. This is where the spec layer pays off.
 
 ---
 
-## Phase 7 — Unity Adapter + Demo Game
+## Phase 7 — Unity Adapter
 
 Thin adapter that wires Unity state and commands into the framework interfaces.
+This completes the framework. The demo game is a separate project (see below).
 
 ### What gets built
 
@@ -184,4 +185,23 @@ Thin adapter that wires Unity state and commands into the framework interfaces.
   or a native plugin bridge
 - Visual editor — Unity Editor window using `GraphView` for drag-and-drop tree authoring,
   backed by `SchemaSerializer` output and saving to YAML
-- Demo game — playable scenario demonstrating the full pipeline end-to-end
+
+---
+
+## Demo Game (separate repository)
+
+A standalone Unity project that consumes the framework as a library.
+Not part of this repository — lives on its own timeline.
+
+### What it demonstrates
+
+- Full pipeline end-to-end: YAML schema → RuntimeRegistry → BehaviorTree → ticking agents
+- Multiple agent types each with their own tree, all sharing one RuntimeRegistry
+- Live reload — tree structure changes at runtime without restarting
+- Visual editor in use — designer edits YAML graph, game reflects changes immediately
+
+### Relationship to this repo
+
+The demo game depends on the framework as a versioned release.
+Framework changes do not require the demo game to update immediately.
+The demo game is not a correctness test for the framework — that is Phase 6.
