@@ -11,11 +11,14 @@
 #include "bt/Condition.h"
 #include "bt/Node.h"
 #include "bt/Parallel.h"
+#include "bt/PartitionConfig.h"
 #include "bt/Policy.h"
 #include "bt/SchemaNode.h"
 #include "bt/SchemaParser.h"
 #include "bt/Selector.h"
 #include "bt/Sequence.h"
+#include "bt/SubtreeScope.h"
+#include "bt/TreeUtils.h"
 
 namespace bt {
 
@@ -95,7 +98,9 @@ std::function<bool()> resolveCondition(const BehaviorSchema& behavior,
     return found->second;
 }
 
-BehaviorTree buildTree(const SchemaDoc& doc, const LoaderRegistry& reg, Blackboard blackboard = {}) {
+BehaviorTree buildTree(const SchemaDoc& doc, const LoaderRegistry& reg,
+                       Blackboard blackboard = {},
+                       const PartitionConfig& partition = {}) {
     auto root = std::make_unique<Selector>("root");
     std::vector<BehaviorMeta> metas;
     metas.reserve(doc.behaviors.size());
@@ -109,10 +114,15 @@ BehaviorTree buildTree(const SchemaDoc& doc, const LoaderRegistry& reg, Blackboa
         if (condition) {
             seq->addChild(std::make_unique<Condition>(behavior.name + "_condition", condition));
         }
-        seq->addChild(buildNode(*behavior.tree, reg));
+        auto subtree = buildNode(*behavior.tree, reg);
+        if (partition.autoPartition && countNodes(*subtree) > partition.maxNodesPerScope) {
+            subtree = std::make_unique<SubtreeScope>(behavior.name + "_scope",
+                                                     std::move(subtree));
+        }
+        seq->addChild(std::move(subtree));
         root->addChild(std::move(seq));
-        metas.push_back(BehaviorMeta{.name        = behavior.name,
-                                      .condition   = condition,
+        metas.push_back(BehaviorMeta{.name          = behavior.name,
+                                      .condition     = condition,
                                       .interruptible = behavior.interruptible});
     }
 
@@ -182,6 +192,35 @@ BehaviorTree SchemaLoader::load(std::string_view yaml, const RuntimeRegistry& re
     }
     auto doc = SchemaParser::parse(yaml);
     return buildTree(doc, loaderReg, std::move(blackboard));
+}
+
+BehaviorTree SchemaLoader::load(std::string_view yaml, const RuntimeRegistry& reg,
+                                 Blackboard blackboard, const PartitionConfig& partition) {
+    LoaderRegistry loaderReg;
+    for (const auto& action : reg.store().allActions()) {
+        const auto* func = reg.findAction(action.name);
+        if (func != nullptr) {
+            loaderReg.actions[action.name] = *func;
+        }
+    }
+    for (const auto& cond : reg.store().allConditions()) {
+        const auto* func = reg.findCondition(cond.name);
+        if (func != nullptr) {
+            loaderReg.conditions[cond.name] = *func;
+        }
+    }
+    auto doc = SchemaParser::parse(yaml);
+    return buildTree(doc, loaderReg, std::move(blackboard), partition);
+}
+
+BehaviorTree SchemaLoader::load(const SchemaDoc& doc, const LoaderRegistry& reg,
+                                 Blackboard blackboard) {
+    return buildTree(doc, reg, std::move(blackboard));
+}
+
+BehaviorTree SchemaLoader::load(const SchemaDoc& doc, const LoaderRegistry& reg,
+                                 Blackboard blackboard, const PartitionConfig& partition) {
+    return buildTree(doc, reg, std::move(blackboard), partition);
 }
 
 BehaviorTree SchemaLoader::loadWithManifest(std::string_view yaml,

@@ -8,6 +8,8 @@
 
 #include "bt/Blackboard.h"
 #include "bt/BehaviorTree.h"
+#include "bt/PartitionConfig.h"
+#include "bt/SchemaNode.h"
 #include "bt/Status.h"
 
 // Forward declaration to avoid pulling in RuntimeRegistry.h everywhere.
@@ -47,6 +49,18 @@ public:
     [[nodiscard]] static BehaviorTree load(std::string_view yaml, const LoaderRegistry& reg);
     [[nodiscard]] static BehaviorTree load(std::string_view yaml, const RuntimeRegistry& reg,
                                             Blackboard blackboard = {});
+    [[nodiscard]] static BehaviorTree load(std::string_view yaml, const RuntimeRegistry& reg,
+                                            Blackboard blackboard,
+                                            const PartitionConfig& partition);
+
+    // Build directly from an already-parsed SchemaDoc. Used by PathExplorer
+    // so it can build multiple trees from the same doc without re-parsing.
+    [[nodiscard]] static BehaviorTree load(const SchemaDoc& doc, const LoaderRegistry& reg,
+                                            Blackboard blackboard = {});
+    [[nodiscard]] static BehaviorTree load(const SchemaDoc& doc, const LoaderRegistry& reg,
+                                            Blackboard blackboard,
+                                            const PartitionConfig& partition);
+
     [[nodiscard]] static BehaviorTree loadWithManifest(std::string_view yaml,
                                                         const SchemaManifest& manifest,
                                                         const LoaderRegistry& reg);
