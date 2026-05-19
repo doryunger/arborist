@@ -29,7 +29,8 @@ BehaviorTree TreeAssembler::assemble(std::vector<BehaviorEntry> entries, Blackbo
                                                         std::move(entry.onExit)));
 
         root->addChild(std::move(seq));
-        metas.push_back(BehaviorMeta{.condition = entry.condition,
+        metas.push_back(BehaviorMeta{.name = entry.name,
+                                      .condition = entry.condition,
                                       .interruptible = entry.interruptible});
     }
 

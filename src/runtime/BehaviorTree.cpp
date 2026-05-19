@@ -13,6 +13,9 @@ Status BehaviorTree::tick() {
             if (shouldInterrupt) {
                 root_->reset();
                 currentBehaviorIndex_ = highest;
+                currentBehaviorName_ = highest.has_value()
+                                           ? behaviors_[*highest].name
+                                           : std::string{};
             }
         }
     }
@@ -30,6 +33,17 @@ Status BehaviorTree::tick() {
     }
 
     return result;
+}
+
+void BehaviorTree::reload(BehaviorTree next) noexcept {
+    if (root_) {
+        root_->reset();
+    }
+    root_ = std::move(next.root_);
+    behaviors_ = std::move(next.behaviors_);
+    blackboard_ = std::move(next.blackboard_);
+    currentBehaviorIndex_.reset();
+    currentBehaviorName_.clear();
 }
 
 std::optional<std::size_t> BehaviorTree::highestPriorityValid() const {

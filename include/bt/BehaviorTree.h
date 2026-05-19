@@ -15,6 +15,7 @@ namespace bt {
 
 // Metadata the tick loop needs per registered behavior for interruption.
 struct BehaviorMeta {
+    std::string name;
     std::function<bool()> condition;  // null means always valid
     bool interruptible{true};
 };
@@ -34,6 +35,10 @@ public:
           emitter_(emitter) {}
 
     Status tick();
+
+    // Hot-swap the tree between ticks. Resets any in-progress RUNNING state,
+    // installs the new root and behavior list, preserves tickCount and emitter.
+    void reload(BehaviorTree next) noexcept;
 
     [[nodiscard]] const Node& root() const noexcept { return *root_; }
     [[nodiscard]] const Blackboard& blackboard() const noexcept { return blackboard_; }
