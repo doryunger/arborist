@@ -41,6 +41,7 @@ file(GLOB_RECURSE BT_SOURCES
     src/registry/*.cpp
     src/simulator/*.cpp
     src/monitor/*.cpp
+    src/harness/*.cpp
 )
 
 if(BT_SOURCES)
