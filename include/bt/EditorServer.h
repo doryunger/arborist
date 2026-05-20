@@ -27,7 +27,7 @@ class EditorServer {
 public:
     // schemaPath: path to the YAML file the editor loads and saves.
     // Pass an empty string to run without file persistence (read-only mode).
-    explicit EditorServer(const RegistryStore& store,
+    explicit EditorServer(RegistryStore& store,
                           std::string_view schemaPath = "");
     ~EditorServer();
 
@@ -54,8 +54,19 @@ public:
     // Returns true on success, false if no path is configured or write fails.
     [[nodiscard]] bool saveSchema(std::string_view yaml) const;
 
+    // Contract authoring — mutate the RegistryStore directly.
+    void putAction(std::string_view name, std::string_view intent,
+                   const std::vector<std::string>& reads,
+                   const std::vector<std::string>& writes);
+    void putCondition(std::string_view name, std::string_view intent,
+                      const std::vector<std::string>& reads);
+    void putStateKey(std::string_view key, std::string_view type);
+    void removeAction(std::string_view name);
+    void removeCondition(std::string_view name);
+    void removeStateKey(std::string_view key);
+
 private:
-    const RegistryStore* store_;
+    RegistryStore* store_;
     std::string          schemaPath_;
     bool                 running_{false};
 

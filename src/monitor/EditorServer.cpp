@@ -35,7 +35,18 @@ static constexpr std::string_view kEditorHtml = R"html(<!DOCTYPE html>
   .badge.disconnected { background: #f38ba8; }
   #main { display: flex; flex: 1; overflow: hidden; }
   .panel { padding: 14px; overflow-y: auto; }
-  #contracts { width: 320px; border-right: 1px solid #313244; display: flex; flex-direction: column; gap: 14px; }
+  #contracts { width: 320px; border-right: 1px solid #313244; display: flex; flex-direction: column; gap: 10px; }
+  .contract-hdr { display: flex; align-items: center; margin-bottom: 6px; }
+  .contract-hdr h2 { flex: 1; margin: 0; }
+  .contract-hdr button { padding: 2px 7px; font-size: 10px; }
+  .contract-form { background: #11111b; border: 1px solid #313244; border-radius: 4px; padding: 8px; display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+  .contract-form label { font-size: 10px; color: #6c7086; }
+  .contract-form input { width: 100%; background: #1e1e2e; border: 1px solid #45475a; border-radius: 3px; color: #cdd6f4; font-family: monospace; font-size: 11px; padding: 3px 6px; }
+  .contract-form input:focus { outline: none; border-color: #89b4fa; }
+  .form-btns { display: flex; gap: 5px; margin-top: 2px; }
+  .item-row { display: flex; gap: 3px; align-items: flex-start; }
+  .item-body { flex: 1; min-width: 0; }
+  .item-btns { display: flex; gap: 2px; flex-shrink: 0; }
   #schema-panel { flex: 1; display: flex; flex-direction: column; gap: 10px; overflow: hidden; padding: 14px; }
   h2 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #89b4fa; }
   .item { margin-bottom: 5px; padding: 6px 9px; border-radius: 5px; background: #181825; border: 1px solid #313244; font-size: 11px; }
@@ -90,16 +101,43 @@ static constexpr std::string_view kEditorHtml = R"html(<!DOCTYPE html>
 <div id="main">
   <div class="panel" id="contracts">
     <div>
-      <h2>Actions</h2>
+      <div class="contract-hdr"><h2>Actions</h2><button onclick="showCForm('action',null)">+</button></div>
       <div id="actions-list"><em style="color:#585b70;font-size:11px">loading...</em></div>
+      <div id="action-form" class="contract-form" style="display:none">
+        <label>Name</label><input id="af-name" placeholder="action_name">
+        <label>Intent</label><input id="af-intent" placeholder="description">
+        <label>Reads (comma-separated)</label><input id="af-reads" placeholder="key1, key2">
+        <label>Writes (comma-separated)</label><input id="af-writes" placeholder="key1, key2">
+        <div class="form-btns">
+          <button onclick="saveCForm('action')">Save</button>
+          <button onclick="hideCForm('action')">Cancel</button>
+        </div>
+      </div>
     </div>
     <div>
-      <h2>Conditions</h2>
+      <div class="contract-hdr"><h2>Conditions</h2><button onclick="showCForm('condition',null)">+</button></div>
       <div id="conditions-list"><em style="color:#585b70;font-size:11px">loading...</em></div>
+      <div id="condition-form" class="contract-form" style="display:none">
+        <label>Name</label><input id="cf-name" placeholder="condition_name">
+        <label>Intent</label><input id="cf-intent" placeholder="description">
+        <label>Reads (comma-separated)</label><input id="cf-reads" placeholder="key1, key2">
+        <div class="form-btns">
+          <button onclick="saveCForm('condition')">Save</button>
+          <button onclick="hideCForm('condition')">Cancel</button>
+        </div>
+      </div>
     </div>
     <div>
-      <h2>Blackboard Keys</h2>
+      <div class="contract-hdr"><h2>Blackboard Keys</h2><button onclick="showCForm('key',null)">+</button></div>
       <div id="blackboard-list"><em style="color:#585b70;font-size:11px">loading...</em></div>
+      <div id="key-form" class="contract-form" style="display:none">
+        <label>Key</label><input id="kf-name" placeholder="key_name">
+        <label>Type</label><input id="kf-type" placeholder="vec3, int, bool...">
+        <div class="form-btns">
+          <button onclick="saveCForm('key')">Save</button>
+          <button onclick="hideCForm('key')">Cancel</button>
+        </div>
+      </div>
     </div>
   </div>
   <div id="schema-panel">
@@ -175,8 +213,79 @@ let selectedBehavior = 0;
 let selectedNodeId = null;
 let isDirty = false;
 let nextNodeId = 0;
+let contractsCache = { actions: [], conditions: [], keys: [] };
 
 function genId() { return nextNodeId++; }
+
+function showCForm(type, item) {
+  ['action','condition','key'].forEach(t => {
+    document.getElementById(t + '-form').style.display = 'none';
+  });
+  document.getElementById(type + '-form').style.display = 'flex';
+  document.getElementById(type + '-form').style.flexDirection = 'column';
+  if (type === 'action') {
+    document.getElementById('af-name').value   = item ? item.name   : '';
+    document.getElementById('af-intent').value = item ? item.intent : '';
+    document.getElementById('af-reads').value  = item ? (item.reads||[]).join(', ')  : '';
+    document.getElementById('af-writes').value = item ? (item.writes||[]).join(', ') : '';
+  } else if (type === 'condition') {
+    document.getElementById('cf-name').value   = item ? item.name   : '';
+    document.getElementById('cf-intent').value = item ? item.intent : '';
+    document.getElementById('cf-reads').value  = item ? (item.reads||[]).join(', ')  : '';
+  } else {
+    document.getElementById('kf-name').value = item ? item.key  : '';
+    document.getElementById('kf-type').value = item ? item.type : '';
+  }
+}
+
+function hideCForm(type) {
+  document.getElementById(type + '-form').style.display = 'none';
+}
+
+function splitTags(str) {
+  return str.split(',').map(s => s.trim()).filter(Boolean);
+}
+
+async function saveCForm(type) {
+  const pathMap = { action: '/api/actions', condition: '/api/conditions', key: '/api/blackboard' };
+  let body;
+  if (type === 'action') {
+    const name = document.getElementById('af-name').value.trim();
+    if (!name) { setStatus('Name is required'); return; }
+    body = { name, intent: document.getElementById('af-intent').value.trim(),
+             reads: splitTags(document.getElementById('af-reads').value),
+             writes: splitTags(document.getElementById('af-writes').value) };
+  } else if (type === 'condition') {
+    const name = document.getElementById('cf-name').value.trim();
+    if (!name) { setStatus('Name is required'); return; }
+    body = { name, intent: document.getElementById('cf-intent').value.trim(),
+             reads: splitTags(document.getElementById('cf-reads').value) };
+  } else {
+    const key = document.getElementById('kf-name').value.trim();
+    if (!key) { setStatus('Key is required'); return; }
+    body = { key, type: document.getElementById('kf-type').value.trim() };
+  }
+  try {
+    const res  = await fetch(pathMap[type], { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await res.json();
+    if (data.error) { setStatus('Save failed: ' + data.error); return; }
+    hideCForm(type);
+    setStatus('Saved');
+    loadContracts();
+  } catch (e) { setStatus('Save failed: ' + e.message); }
+}
+
+async function deleteContract(type, name) {
+  const pathMap = { action: '/api/actions/', condition: '/api/conditions/', key: '/api/blackboard/' };
+  if (!window.confirm('Delete ' + type + " '" + name + "'?")) { return; }
+  try {
+    const res  = await fetch(pathMap[type] + encodeURIComponent(name), { method: 'DELETE' });
+    const data = await res.json();
+    if (data.error) { setStatus('Delete failed: ' + data.error); return; }
+    setStatus("Deleted '" + name + "'");
+    loadContracts();
+  } catch (e) { setStatus('Delete failed: ' + e.message); }
+}
 
 function isComposite(type) {
   return type === 'sequence' || type === 'selector' || type === 'parallel';
@@ -214,6 +323,13 @@ function showView(view) {
   if (!isSchema && !treeData) { loadTree(); }
 }
 
+function editBtn(type, idx) {
+  return `<button onclick="showCForm('${type}',contractsCache.${type === 'key' ? 'keys' : type + 's'}[${idx}])" style="padding:1px 5px;font-size:9px" title="Edit">&#x270E;</button>`;
+}
+function delBtn(type, name) {
+  return `<button onclick="deleteContract('${type}','${name}')" class="btn-danger" style="padding:1px 5px;font-size:9px" title="Delete">&#x2715;</button>`;
+}
+
 async function loadContracts() {
   try {
     const [actRes, condRes, bbRes] = await Promise.all([
@@ -222,29 +338,47 @@ async function loadContracts() {
     const actions    = await actRes.json();
     const conditions = await condRes.json();
     const blackboard = await bbRes.json();
+    contractsCache.actions    = actions;
+    contractsCache.conditions = conditions;
+    contractsCache.keys       = blackboard;
     document.getElementById('conn-badge').textContent = 'connected';
     document.getElementById('conn-badge').classList.remove('disconnected');
-    document.getElementById('actions-list').innerHTML = actions.map(a => `
+    document.getElementById('actions-list').innerHTML = actions.map((a, idx) => `
       <div class="item">
-        <div class="name">${a.name}</div>
-        ${a.intent ? `<div class="intent">${a.intent}</div>` : ''}
-        <div class="deps">
-          ${(a.reads||[]).map(r=>`<span class="tag read">r: ${r}</span>`).join('')}
-          ${(a.writes||[]).map(w=>`<span class="tag write">w: ${w}</span>`).join('')}
+        <div class="item-row">
+          <div class="item-body">
+            <div class="name">${a.name}</div>
+            ${a.intent ? `<div class="intent">${a.intent}</div>` : ''}
+            <div class="deps">
+              ${(a.reads||[]).map(r=>`<span class="tag read">r: ${r}</span>`).join('')}
+              ${(a.writes||[]).map(w=>`<span class="tag write">w: ${w}</span>`).join('')}
+            </div>
+          </div>
+          <div class="item-btns">${editBtn('action',idx)}${delBtn('action',a.name)}</div>
         </div>
       </div>`).join('') || '<em style="color:#585b70;font-size:11px">none registered</em>';
-    document.getElementById('conditions-list').innerHTML = conditions.map(c => `
+    document.getElementById('conditions-list').innerHTML = conditions.map((c, idx) => `
       <div class="item">
-        <div class="name">${c.name}</div>
-        ${c.intent ? `<div class="intent">${c.intent}</div>` : ''}
-        <div class="deps">
-          ${(c.reads||[]).map(r=>`<span class="tag read">r: ${r}</span>`).join('')}
+        <div class="item-row">
+          <div class="item-body">
+            <div class="name">${c.name}</div>
+            ${c.intent ? `<div class="intent">${c.intent}</div>` : ''}
+            <div class="deps">
+              ${(c.reads||[]).map(r=>`<span class="tag read">r: ${r}</span>`).join('')}
+            </div>
+          </div>
+          <div class="item-btns">${editBtn('condition',idx)}${delBtn('condition',c.name)}</div>
         </div>
       </div>`).join('') || '<em style="color:#585b70;font-size:11px">none registered</em>';
-    document.getElementById('blackboard-list').innerHTML = blackboard.map(k => `
+    document.getElementById('blackboard-list').innerHTML = blackboard.map((k, idx) => `
       <div class="item">
-        <span class="tag key">${k.key}</span>
-        <span style="font-size:10px;color:#a6adc8;margin-left:6px">${k.type}</span>
+        <div class="item-row">
+          <div class="item-body">
+            <span class="tag key">${k.key}</span>
+            <span style="font-size:10px;color:#a6adc8;margin-left:6px">${k.type}</span>
+          </div>
+          <div class="item-btns">${editBtn('key',idx)}${delBtn('key',k.key)}</div>
+        </div>
       </div>`).join('') || '<em style="color:#585b70;font-size:11px">none declared</em>';
     setStatus('Contracts loaded — ' + actions.length + ' actions, ' + conditions.length + ' conditions');
   } catch (e) {
@@ -701,6 +835,51 @@ std::string extractJsonStringField(const std::string& json, std::string_view key
     return result;
 }
 
+// Parse one JSON string starting just after its opening quote; advances pos past closing quote.
+std::string parseJsonStr(const std::string& json, std::size_t& pos) {
+    std::string item;
+    bool esc = false;
+    while (pos < json.size()) {
+        if (esc) {
+            if      (json[pos] == '"')  { item += '"';  }
+            else if (json[pos] == '\\') { item += '\\'; }
+            else if (json[pos] == 'n')  { item += '\n'; }
+            else                        { item += json[pos]; }
+            esc = false;
+        } else if (json[pos] == '\\') {
+            esc = true;
+        } else if (json[pos] == '"') {
+            ++pos; break;
+        } else {
+            item += json[pos];
+        }
+        ++pos;
+    }
+    return item;
+}
+
+std::vector<std::string> extractJsonStringArray(const std::string& json, std::string_view key) {
+    const std::string search = "\"" + std::string(key) + "\"";
+    const auto keyPos = json.find(search);
+    if (keyPos == std::string::npos) { return {}; }
+    const auto colonPos = json.find(':', keyPos + search.size());
+    if (colonPos == std::string::npos) { return {}; }
+    const auto arrStart = json.find('[', colonPos + 1);
+    if (arrStart == std::string::npos) { return {}; }
+    std::vector<std::string> result;
+    std::size_t pos = arrStart + 1;
+    while (pos < json.size()) {
+        while (pos < json.size() && (std::isspace(static_cast<unsigned char>(json[pos])) != 0)) { ++pos; }
+        if (pos >= json.size() || json[pos] == ']') { break; }
+        if (json[pos] != '"') { ++pos; continue; }
+        ++pos;
+        result.push_back(parseJsonStr(json, pos));
+        while (pos < json.size() && json[pos] != ',' && json[pos] != ']') { ++pos; }
+        if (pos < json.size() && json[pos] == ',') { ++pos; }
+    }
+    return result;
+}
+
 std::string_view schemaNodeTypeName(SchemaNodeType type) {
     switch (type) {
         case SchemaNodeType::SEQUENCE:  return "sequence";
@@ -822,7 +1001,7 @@ struct EditorServer::Impl {
 
 // ── EditorServer ──────────────────────────────────────────────────────────────
 
-EditorServer::EditorServer(const RegistryStore& store, std::string_view schemaPath)
+EditorServer::EditorServer(RegistryStore& store, std::string_view schemaPath)
     : store_(&store), schemaPath_(schemaPath), impl_(std::make_unique<Impl>()) {}
 
 EditorServer::~EditorServer() {
@@ -872,6 +1051,25 @@ std::string EditorServer::getTreeJson() const {
 bool EditorServer::saveSchema(std::string_view yaml) const {
     return writeFile(schemaPath_, yaml);
 }
+
+void EditorServer::putAction(std::string_view name, std::string_view intent,
+                              const std::vector<std::string>& reads,
+                              const std::vector<std::string>& writes) {
+    store_->upsertAction({std::string(name), std::string(intent), reads, writes});
+}
+
+void EditorServer::putCondition(std::string_view name, std::string_view intent,
+                                 const std::vector<std::string>& reads) {
+    store_->upsertCondition({std::string(name), std::string(intent), reads});
+}
+
+void EditorServer::putStateKey(std::string_view key, std::string_view type) {
+    store_->upsertStateKey(key, type);
+}
+
+void EditorServer::removeAction(std::string_view name)    { store_->removeAction(name);    }
+void EditorServer::removeCondition(std::string_view name) { store_->removeCondition(name); }
+void EditorServer::removeStateKey(std::string_view key)   { store_->removeStateKey(key);   }
 
 void EditorServer::start(int port) {
     impl_->server.Get("/", [](const httplib::Request& /*req*/, httplib::Response& res) {
@@ -923,6 +1121,45 @@ void EditorServer::start(int port) {
 
     impl_->server.Get("/api/tree", [this](const httplib::Request& /*req*/, httplib::Response& res) {
         res.set_content(getTreeJson(), "application/json");
+    });
+
+    impl_->server.Put("/api/actions", [this](const httplib::Request& req, httplib::Response& res) {
+        const std::string name = extractJsonStringField(req.body, "name");
+        if (name.empty()) { res.status = 400; res.set_content(R"({"error":"name required"})", "application/json"); return; }
+        putAction(name, extractJsonStringField(req.body, "intent"),
+                  extractJsonStringArray(req.body, "reads"),
+                  extractJsonStringArray(req.body, "writes"));
+        res.set_content(R"({"ok":true})", "application/json");
+    });
+
+    impl_->server.Delete("/api/actions/:name", [this](const httplib::Request& req, httplib::Response& res) {
+        removeAction(req.path_params.at("name"));
+        res.set_content(R"({"ok":true})", "application/json");
+    });
+
+    impl_->server.Put("/api/conditions", [this](const httplib::Request& req, httplib::Response& res) {
+        const std::string name = extractJsonStringField(req.body, "name");
+        if (name.empty()) { res.status = 400; res.set_content(R"({"error":"name required"})", "application/json"); return; }
+        putCondition(name, extractJsonStringField(req.body, "intent"),
+                     extractJsonStringArray(req.body, "reads"));
+        res.set_content(R"({"ok":true})", "application/json");
+    });
+
+    impl_->server.Delete("/api/conditions/:name", [this](const httplib::Request& req, httplib::Response& res) {
+        removeCondition(req.path_params.at("name"));
+        res.set_content(R"({"ok":true})", "application/json");
+    });
+
+    impl_->server.Put("/api/blackboard", [this](const httplib::Request& req, httplib::Response& res) {
+        const std::string key = extractJsonStringField(req.body, "key");
+        if (key.empty()) { res.status = 400; res.set_content(R"({"error":"key required"})", "application/json"); return; }
+        putStateKey(key, extractJsonStringField(req.body, "type"));
+        res.set_content(R"({"ok":true})", "application/json");
+    });
+
+    impl_->server.Delete("/api/blackboard/:key", [this](const httplib::Request& req, httplib::Response& res) {
+        removeStateKey(req.path_params.at("key"));
+        res.set_content(R"({"ok":true})", "application/json");
     });
 
     impl_->thread = std::thread([this, port] {
