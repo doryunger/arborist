@@ -48,6 +48,7 @@ public:
     [[nodiscard]] std::string getBlackboardJson() const;
     [[nodiscard]] std::string getSchemaJson()     const;
     [[nodiscard]] std::string getAnalyzeJson()    const;
+    [[nodiscard]] std::string getTreeJson()       const;
 
     // Save schema YAML to the configured file path.
     // Returns true on success, false if no path is configured or write fails.
