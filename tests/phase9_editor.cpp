@@ -287,6 +287,70 @@ behaviors:
     std::filesystem::remove(tmpPath);
 }
 
+// ── Tree JSON ──────────────────────────────────────────────────────────────────
+
+TEST(Phase9_EditorServer, TreeJsonWithNoFileReturnsError) {
+    bt::RegistryStore store(":memory:");
+    populateStore(store);
+    bt::EditorServer editor(store);  // no file path
+    const std::string json = editor.getTreeJson();
+    EXPECT_NE(json.find("error"), std::string::npos);
+}
+
+TEST(Phase9_EditorServer, TreeJsonContainsBehaviorNames) {
+    const std::string tmpPath = "/tmp/bt_test_tree_behaviors.yaml";
+    { std::ofstream f(tmpPath); f << kTestSchemaYaml; }
+
+    bt::RegistryStore store(":memory:");
+    populateStore(store);
+    bt::EditorServer editor(store, tmpPath);
+    const std::string json = editor.getTreeJson();
+    EXPECT_NE(json.find("\"combat\""),  std::string::npos);
+    EXPECT_NE(json.find("\"patrol\""),  std::string::npos);
+
+    std::filesystem::remove(tmpPath);
+}
+
+TEST(Phase9_EditorServer, TreeJsonContainsNodeTypes) {
+    const std::string tmpPath = "/tmp/bt_test_tree_types.yaml";
+    { std::ofstream f(tmpPath); f << kTestSchemaYaml; }
+
+    bt::RegistryStore store(":memory:");
+    populateStore(store);
+    bt::EditorServer editor(store, tmpPath);
+    const std::string json = editor.getTreeJson();
+    EXPECT_NE(json.find("sequence"), std::string::npos);
+    EXPECT_NE(json.find("action"),   std::string::npos);
+
+    std::filesystem::remove(tmpPath);
+}
+
+TEST(Phase9_EditorServer, TreeJsonContainsConditionGating) {
+    const std::string tmpPath = "/tmp/bt_test_tree_condition.yaml";
+    { std::ofstream f(tmpPath); f << kTestSchemaYaml; }
+
+    bt::RegistryStore store(":memory:");
+    populateStore(store);
+    bt::EditorServer editor(store, tmpPath);
+    const std::string json = editor.getTreeJson();
+    EXPECT_NE(json.find("enemy_visible"), std::string::npos);
+
+    std::filesystem::remove(tmpPath);
+}
+
+TEST(Phase9_EditorServer, TreeJsonHasChildrenArray) {
+    const std::string tmpPath = "/tmp/bt_test_tree_children.yaml";
+    { std::ofstream f(tmpPath); f << kTestSchemaYaml; }
+
+    bt::RegistryStore store(":memory:");
+    populateStore(store);
+    bt::EditorServer editor(store, tmpPath);
+    const std::string json = editor.getTreeJson();
+    EXPECT_NE(json.find("\"children\""), std::string::npos);
+
+    std::filesystem::remove(tmpPath);
+}
+
 // ── HTTP server integration ────────────────────────────────────────────────────
 
 TEST(Phase9_EditorServer, ServerStartsAndServes) {
