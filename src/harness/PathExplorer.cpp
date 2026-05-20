@@ -68,8 +68,8 @@ LoaderRegistry buildMockRegistry(const MockSources& src) {
     LoaderRegistry reg;
     for (const auto& name : src.conditionNames) {
         reg.conditions[name] = [table = src.condTable, name]() {
-            auto it = table->find(name);
-            return it != table->end() && it->second;
+            auto found = table->find(name);
+            return found != table->end() && found->second;
         };
     }
     for (const auto& name : src.actionNames) {

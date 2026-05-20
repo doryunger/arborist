@@ -1,6 +1,8 @@
 #include "bt/ComplexityAnalyzer.h"
 
+#include <algorithm>
 #include <cstddef>
+#include <ranges>
 #include <string>
 
 #include "bt/CompositeNode.h"
@@ -16,8 +18,8 @@ struct WalkState {
     std::size_t maxWidth{0};
     std::size_t compositesVisited{0};
     std::size_t totalChildrenOfComposites{0};
-    std::vector<ComplexityAnalyzer::Issue>& issues;
-    const ComplexityAnalyzer::Thresholds& thresholds;
+    std::vector<ComplexityAnalyzer::Issue>* issues{nullptr};
+    const ComplexityAnalyzer::Thresholds*  thresholds{nullptr};
 };
 
 void walkNode(const Node& node, std::size_t depth, const std::string& path,
@@ -37,14 +39,14 @@ void walkNode(const Node& node, std::size_t depth, const std::string& path,
         state.totalChildrenOfComposites += kidCount;
 
         if (kidCount == 0) {
-            state.issues.push_back({
+            state.issues->push_back({
                 ComplexityAnalyzer::Issue::Code::EMPTY_COMPOSITE,
                 ComplexityAnalyzer::Issue::Severity::ERROR,
                 path,
                 "Composite node '" + std::string(node.name()) + "' has no children"
             });
         } else if (kidCount == 1) {
-            state.issues.push_back({
+            state.issues->push_back({
                 ComplexityAnalyzer::Issue::Code::SINGLE_CHILD_COMPOSITE,
                 ComplexityAnalyzer::Issue::Severity::WARNING,
                 path,
@@ -56,7 +58,7 @@ void walkNode(const Node& node, std::size_t depth, const std::string& path,
         if (par != nullptr) {
             const auto& policy = par->policy();
             if (policy.threshold() > kidCount) {
-                state.issues.push_back({
+                state.issues->push_back({
                     ComplexityAnalyzer::Issue::Code::PARALLEL_THRESHOLD_UNREACHABLE,
                     ComplexityAnalyzer::Issue::Severity::ERROR,
                     path,
@@ -77,10 +79,9 @@ void walkNode(const Node& node, std::size_t depth, const std::string& path,
 }  // namespace
 
 bool ComplexityAnalyzer::Report::hasErrors() const noexcept {
-    for (const auto& issue : issues) {
-        if (issue.isError()) { return true; }
-    }
-    return false;
+    return std::ranges::any_of(issues, [](const Issue& issue) {
+        return issue.isError();
+    });
 }
 
 bool ComplexityAnalyzer::Report::clean() const noexcept {
@@ -115,8 +116,8 @@ ComplexityAnalyzer::Report ComplexityAnalyzer::analyze(const BehaviorTree& tree,
                                                          Thresholds thresholds) {
     Report report;
     WalkState state{
-        .issues     = report.issues,
-        .thresholds = thresholds,
+        .issues     = &report.issues,
+        .thresholds = &thresholds,
     };
 
     walkNode(tree.root(), 0, std::string(tree.root().name()), state);
@@ -171,17 +172,16 @@ ComplexityAnalyzer::Report ComplexityAnalyzer::analyze(const BehaviorTree& tree,
                 "Behavior '" + metas[idx].name + "' has no condition and shadows " +
                 std::to_string(metas.size() - idx - 1) + " behavior(s) that follow it"
             });
-            break;  // one report is enough — remaining are all shadowed by the same cause
+            break;
         }
     }
 
     // No fallback: all behaviors have conditions → tree may return FAILURE
     // when none are true.
     if (!metas.empty()) {
-        bool hasFallback = false;
-        for (const auto& meta : metas) {
-            if (!meta.condition) { hasFallback = true; break; }
-        }
+        const bool hasFallback = std::ranges::any_of(metas, [](const BehaviorMeta& meta) {
+            return !meta.condition;
+        });
         if (!hasFallback) {
             report.issues.push_back({
                 Issue::Code::NO_FALLBACK_BEHAVIOR,
