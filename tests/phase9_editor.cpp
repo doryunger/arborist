@@ -351,6 +351,72 @@ TEST(Phase9_EditorServer, TreeJsonHasChildrenArray) {
     std::filesystem::remove(tmpPath);
 }
 
+TEST(Phase9_EditorServer, TreeJsonIncludesNodeIntent) {
+    static constexpr std::string_view kIntentYaml = R"(
+schema_version: "1.0"
+behaviors:
+  - name: attack_behavior
+    tree:
+      type: action
+      name: attack
+      intent: Strike the current target
+)";
+    const std::string tmpPath = "/tmp/bt_test_tree_intent.yaml";
+    { std::ofstream f(tmpPath); f << kIntentYaml; }
+
+    bt::RegistryStore store(":memory:");
+    populateStore(store);
+    bt::EditorServer editor(store, tmpPath);
+    const std::string json = editor.getTreeJson();
+    EXPECT_NE(json.find("Strike the current target"), std::string::npos);
+
+    std::filesystem::remove(tmpPath);
+}
+
+TEST(Phase9_EditorServer, TreeJsonParallelIncludesPolicy) {
+    static constexpr std::string_view kParallelYaml = R"(
+schema_version: "1.0"
+behaviors:
+  - name: multitask
+    tree:
+      type: parallel
+      name: multi_root
+      policy: any
+      children:
+        - type: action
+          name: walk_waypoint
+        - type: action
+          name: attack
+)";
+    const std::string tmpPath = "/tmp/bt_test_tree_parallel.yaml";
+    { std::ofstream f(tmpPath); f << kParallelYaml; }
+
+    bt::RegistryStore store(":memory:");
+    populateStore(store);
+    bt::EditorServer editor(store, tmpPath);
+    const std::string json = editor.getTreeJson();
+    EXPECT_NE(json.find("\"policy\""), std::string::npos);
+    EXPECT_NE(json.find("\"any\""),    std::string::npos);
+
+    std::filesystem::remove(tmpPath);
+}
+
+TEST(Phase9_EditorServer, TreeJsonNodeIdsAreSequential) {
+    const std::string tmpPath = "/tmp/bt_test_tree_ids.yaml";
+    { std::ofstream f(tmpPath); f << kTestSchemaYaml; }
+
+    bt::RegistryStore store(":memory:");
+    populateStore(store);
+    bt::EditorServer editor(store, tmpPath);
+    const std::string json = editor.getTreeJson();
+    // kTestSchemaYaml has 5 nodes: combat_seq, attack, ammo_low, reload, walk_waypoint
+    EXPECT_NE(json.find("\"id\":0"), std::string::npos);
+    EXPECT_NE(json.find("\"id\":4"), std::string::npos);
+    EXPECT_EQ(json.find("\"id\":5"), std::string::npos);
+
+    std::filesystem::remove(tmpPath);
+}
+
 // ── HTTP server integration ────────────────────────────────────────────────────
 
 TEST(Phase9_EditorServer, ServerStartsAndServes) {
