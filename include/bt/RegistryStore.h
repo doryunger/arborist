@@ -29,6 +29,10 @@ public:
     void upsertCondition(const ConditionSpec& spec);
     void upsertStateKey(std::string_view key, std::string_view type);
 
+    void removeAction(std::string_view name);
+    void removeCondition(std::string_view name);
+    void removeStateKey(std::string_view key);
+
     [[nodiscard]] std::optional<ActionSpec> findAction(std::string_view name) const;
     [[nodiscard]] std::optional<ConditionSpec> findCondition(std::string_view name) const;
     [[nodiscard]] std::vector<ActionSpec> allActions() const;

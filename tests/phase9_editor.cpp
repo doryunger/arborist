@@ -417,6 +417,64 @@ TEST(Phase9_EditorServer, TreeJsonNodeIdsAreSequential) {
     std::filesystem::remove(tmpPath);
 }
 
+// ── Contract authoring ────────────────────────────────────────────────────────
+
+TEST(Phase9_EditorServer, UpsertActionAddsToStore) {
+    bt::RegistryStore store(":memory:");
+    bt::EditorServer editor(store);
+    editor.putAction("shoot", "Fire the weapon", {"target_pos"}, {"ammo_count"});
+    const std::string json = editor.getActionsJson();
+    EXPECT_NE(json.find("shoot"),           std::string::npos);
+    EXPECT_NE(json.find("Fire the weapon"), std::string::npos);
+}
+
+TEST(Phase9_EditorServer, UpsertConditionAddsToStore) {
+    bt::RegistryStore store(":memory:");
+    bt::EditorServer editor(store);
+    editor.putCondition("has_ammo", "True when ammo > 0", {"ammo_count"});
+    const std::string json = editor.getConditionsJson();
+    EXPECT_NE(json.find("has_ammo"), std::string::npos);
+}
+
+TEST(Phase9_EditorServer, UpsertStateKeyAddsToStore) {
+    bt::RegistryStore store(":memory:");
+    bt::EditorServer editor(store);
+    editor.putStateKey("health", "float");
+    const std::string json = editor.getBlackboardJson();
+    EXPECT_NE(json.find("health"), std::string::npos);
+    EXPECT_NE(json.find("float"),  std::string::npos);
+}
+
+TEST(Phase9_EditorServer, RemoveActionDeletesFromStore) {
+    bt::RegistryStore store(":memory:");
+    populateStore(store);
+    bt::EditorServer editor(store);
+    editor.removeAction("attack");
+    const std::string json = editor.getActionsJson();
+    EXPECT_EQ(json.find("\"attack\""), std::string::npos);
+    EXPECT_NE(json.find("reload"),     std::string::npos);
+}
+
+TEST(Phase9_EditorServer, RemoveConditionDeletesFromStore) {
+    bt::RegistryStore store(":memory:");
+    populateStore(store);
+    bt::EditorServer editor(store);
+    editor.removeCondition("enemy_visible");
+    const std::string json = editor.getConditionsJson();
+    EXPECT_EQ(json.find("\"enemy_visible\""), std::string::npos);
+    EXPECT_NE(json.find("ammo_low"),          std::string::npos);
+}
+
+TEST(Phase9_EditorServer, RemoveStateKeyDeletesFromStore) {
+    bt::RegistryStore store(":memory:");
+    populateStore(store);
+    bt::EditorServer editor(store);
+    editor.removeStateKey("enemy_pos");
+    const std::string json = editor.getBlackboardJson();
+    EXPECT_EQ(json.find("\"enemy_pos\""), std::string::npos);
+    EXPECT_NE(json.find("ammo_count"),    std::string::npos);
+}
+
 // ── HTTP server integration ────────────────────────────────────────────────────
 
 TEST(Phase9_EditorServer, ServerStartsAndServes) {

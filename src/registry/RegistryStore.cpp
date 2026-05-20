@@ -158,6 +158,35 @@ void RegistryStore::upsertStateKey(std::string_view key, std::string_view type) 
     sqlite3_step(stmt.get());
 }
 
+void RegistryStore::removeAction(std::string_view name) {
+    const std::string nameStr(name);
+    auto stmt1 = prepare(db_, "DELETE FROM action_reads  WHERE action_name = ?");
+    bindText(stmt1.get(), 1, nameStr);
+    sqlite3_step(stmt1.get());
+    auto stmt2 = prepare(db_, "DELETE FROM action_writes WHERE action_name = ?");
+    bindText(stmt2.get(), 1, nameStr);
+    sqlite3_step(stmt2.get());
+    auto stmt3 = prepare(db_, "DELETE FROM actions WHERE name = ?");
+    bindText(stmt3.get(), 1, nameStr);
+    sqlite3_step(stmt3.get());
+}
+
+void RegistryStore::removeCondition(std::string_view name) {
+    const std::string nameStr(name);
+    auto stmt1 = prepare(db_, "DELETE FROM condition_reads WHERE condition_name = ?");
+    bindText(stmt1.get(), 1, nameStr);
+    sqlite3_step(stmt1.get());
+    auto stmt2 = prepare(db_, "DELETE FROM conditions WHERE name = ?");
+    bindText(stmt2.get(), 1, nameStr);
+    sqlite3_step(stmt2.get());
+}
+
+void RegistryStore::removeStateKey(std::string_view key) {
+    auto stmt = prepare(db_, "DELETE FROM state_keys WHERE key = ?");
+    bindText(stmt.get(), 1, std::string(key));
+    sqlite3_step(stmt.get());
+}
+
 std::optional<ActionSpec> RegistryStore::findAction(std::string_view name) const {
     auto stmt = prepare(db_, "SELECT name, intent FROM actions WHERE name = ?");
     bindText(stmt.get(), 1, std::string(name));
