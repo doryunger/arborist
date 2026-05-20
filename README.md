@@ -2,8 +2,6 @@
 
 A game-engine-agnostic framework for authoring, executing, monitoring, and automatically testing AI behavior trees. The framework owns the full decision-making pipeline from authoring to analysis; the game engine is reduced to a state provider and command executor.
 
-This is a working concept built to validate the architecture. All described capabilities are implemented, tested (261 passing tests), and benchmarked. The limitations section is honest about what is not yet built and what requires design work before production adoption.
-
 ---
 
 ## The Problem
@@ -64,8 +62,6 @@ When the runtime starts, a contract validator cross-references these declaration
 
 The separation between declaration (what this behavior does) and implementation (how it does it) means a designer can plan an AI's full behavior set, including its data dependencies, before a single line of C++ is written.
 
-The SQLite store is also the foundation for the planned visual editor. Because every behavior, condition, action, and blackboard dependency is already declared in structured form, an editor can read and write the full AI graph without touching source files or the game runtime.
-
 ---
 
 ## The Blackboard
@@ -85,6 +81,34 @@ Every running tree can be connected to an embedded HTTP server that serves a bro
 The sidebar shows the last twenty ticks as a scrollable history: tick number, which behavior was active, and the final result. Clicking into a tick record shows the full active path through the tree and the blackboard snapshot at that moment.
 
 The server also exposes two JSON endpoints that external tools can poll: one for the static tree structure and one for the rolling tick history. Any dashboard, logging pipeline, or automated analysis tool can consume these without coupling to the framework's internals.
+
+---
+
+## Visual Editor
+
+A standalone browser-based editor runs on a separate HTTP server (default port 8081) backed entirely by the SQLite contract store. It works independently of any live tree or game runtime — purely from declared contracts and the YAML schema on disk.
+
+**Tree authoring.** The editor renders the behavior tree as an interactive graph. Clicking a node opens an edit panel where its type, name, and intent can be changed. New child nodes can be appended to any composite, nodes can be reordered within their parent, and any node can be deleted. All edits are held in memory until explicitly saved.
+
+**Contract authoring.** The editor provides forms for creating, editing, and deleting actions, conditions, and blackboard keys directly in the SQLite store. Adds and removals are reflected immediately in the editor and in the REST API. A designer can build out the full action/condition vocabulary before any C++ is written.
+
+**Inline validation.** When the tree is loaded, the editor fetches the current analysis report and overlays issue indicators directly on the graph. Nodes with warnings or errors show a colored glow and a badge counting how many issues they carry. Behaviors with issues display a colored dot in the behavior list. This makes structural problems visible without leaving the authoring tool.
+
+**Save to file.** The editor serializes the in-memory tree back to YAML and writes it to the schema file on disk via `POST /api/schema`. The serializer reconstructs valid, properly-indented YAML from the graph state — the round-trip is lossless for all node types the framework supports.
+
+**REST API.** All editor data is also accessible as JSON endpoints for external tooling:
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/actions` | All declared actions |
+| `GET /api/conditions` | All declared conditions |
+| `GET /api/blackboard` | All declared blackboard keys |
+| `GET /api/schema` | Current schema YAML |
+| `POST /api/schema` | Save updated schema YAML |
+| `GET /api/tree` | Full tree as structured JSON (node types, IDs, paths, intent) |
+| `GET /api/analyze` | Complexity analysis — issues and metrics |
+| `PUT /api/actions/:name` | Upsert an action contract |
+| `DELETE /api/actions/:name` | Remove an action contract |
 
 ---
 
@@ -171,7 +195,7 @@ The framework includes a large-scale benchmark that synthesizes agent population
 - Logic errors surface at load time, not during gameplay
 - Large trees are automatically partitioned into manageable scopes
 - Live browser viewer shows exactly which nodes ran and with what result
-- SQLite contract store is the foundation for a future visual editor
+- Browser-based visual editor for authoring trees and contracts without touching source files
 
 ---
 
@@ -185,27 +209,9 @@ The framework includes a large-scale benchmark that synthesizes agent population
 
 **Exhaustive path exploration scales with condition count.** With twenty or fewer distinct conditions, Arborist can try every possible combination. Beyond twenty conditions, it falls back to random sampling. Very large trees with dozens of distinct conditions may require targeted scenario testing to achieve full behavior coverage.
 
-**Auto-partitioning operates at behavior-subtree granularity.** When a subtree is partitioned, the boundary is placed at the root of that subtree. Deeply nested hot spots within a single behavior's subtree are not recursively subdivided automatically — that is a planned capability.
+**Auto-partitioning operates at behavior-subtree granularity.** When a subtree is partitioned, the boundary is placed at the root of that subtree. Deeply nested hot spots within a single behavior's subtree are not recursively subdivided automatically.
 
 **RUNNING state belongs to the action.** When an action returns Running across multiple ticks, the framework resumes it correctly, but the action itself is responsible for managing its own in-progress state. The framework does not persist state for actions between ticks — it only preserves the position in the tree.
-
-**No built-in visual editor.** Trees are authored in YAML. A visual graph editor backed by the schema serializer and SQLite contract store is planned for the next development phase.
-
----
-
-## Roadmap
-
-The framework is complete through the authoring, execution, analysis, and testing layers. The following capabilities are planned and the architecture is designed to accommodate them.
-
-**Engine adapter.** A thin integration layer that connects Arborist to a specific engine's entity system, update loop, and job scheduler. The adapter is the only engine-specific code; everything above it is portable.
-
-**Visual editor.** A graph-based behavior authoring tool backed by the SQLite contract store. Because all behaviors, conditions, and blackboard dependencies are already declared in structured form, the editor reads and writes the same data the runtime uses — no separate representation.
-
-**Multi-threaded ticking.** The internal tick counter and blackboard would need redesign to support safe parallel evaluation across agents. The contract and schema layers are already stateless and require no changes.
-
-**Decorator nodes.** Wrappers that modify a child's result without replacing it — inverters, retry limits, cooldowns, and probability gates. These are structural additions to the node hierarchy and do not affect existing trees.
-
-**Recursive auto-partitioning.** Currently the partition boundary is placed at the root of an oversized subtree. A future version would subdivide recursively, placing scope boundaries at the deepest hot spots within a behavior rather than at its entry point.
 
 ---
 
@@ -218,10 +224,10 @@ src/schema/       YAML parsing, tree assembly, SchemaNode deep clone
 src/registry/     SQLite contract store and validator
 src/harness/      ScenarioRunner, PathExplorer (automated testing)
 src/analysis/     ComplexityAnalyzer, SubtreeScope, LazySubtree
-src/monitor/      Embedded HTTP server and browser viewer
+src/monitor/      Live viewer server (port 8080) and visual editor server (port 8081)
 src/simulator/    MockEngine, headless Simulator
 src/builder/      Code-first tree builder API
-tests/            Phase test files (phase0 through phase8)
+tests/            Phase test files (phase0 through phase9)
 benchmarks/       Large-scale throughput benchmark (200 agents × 3600 ticks)
 examples/         NPC guard demo, pipeline smoke test
 docs/             Full design plan and resolved decisions
@@ -251,3 +257,5 @@ Run the included NPC demo and open `http://localhost:8080` to see the live tree 
 ```bash
 ./build/examples/bt_demo
 ```
+
+To launch the visual editor standalone, instantiate `bt::EditorServer` with a `RegistryStore` and a path to your schema file, then call `start()`. The editor is available at `http://localhost:8081`.
