@@ -5,6 +5,8 @@
 
 #include "bt/Blackboard.h"
 #include "bt/BehaviorTree.h"
+#include "bt/DecisionEmitter.h"
+#include "bt/MonitorServer.h"
 #include "bt/SchemaLoader.h"
 #include "bt/SchemaParser.h"
 #include "bt/Status.h"
@@ -34,6 +36,25 @@ struct CRegistry {
 
     bt::LoaderRegistry loaderReg;
     bt::Blackboard     blackboard;
+};
+
+// Wraps a BehaviorTree with an optional live monitor.  The opaque bt_handle_t
+// always points to one of these — callers never see the internal type.
+struct CTree {
+    explicit CTree(bt::BehaviorTree&& tree) : tree(std::move(tree)) {}
+
+    ~CTree() {
+        if (monitor) { monitor->stop(); }
+    }
+
+    CTree(const CTree&) = delete;
+    CTree& operator=(const CTree&) = delete;
+    CTree(CTree&&) = delete;
+    CTree& operator=(CTree&&) = delete;
+
+    bt::BehaviorTree                  tree;
+    std::unique_ptr<bt::DecisionEmitter> emitter;
+    std::unique_ptr<bt::MonitorServer>   monitor;
 };
 
 bt::Status capiStatusToCpp(BtCStatus status) noexcept {
@@ -117,9 +138,7 @@ bt_handle_t bt_tree_load(bt_handle_t reg, const char* yaml) {
     try {
         auto& cReg = *static_cast<CRegistry*>(reg);
         auto doc = bt::SchemaParser::parse(yaml);
-        auto tree = std::make_unique<bt::BehaviorTree>(
-            bt::SchemaLoader::load(doc, cReg.loaderReg, cReg.blackboard));
-        return tree.release();
+        return new CTree(bt::SchemaLoader::load(doc, cReg.loaderReg, cReg.blackboard));
     } catch (const std::exception& exc) {
         setError(exc.what());
         return nullptr;
@@ -127,7 +146,7 @@ bt_handle_t bt_tree_load(bt_handle_t reg, const char* yaml) {
 }
 
 void bt_tree_destroy(bt_handle_t tree) {
-    delete static_cast<bt::BehaviorTree*>(tree);
+    delete static_cast<CTree*>(tree);
 }
 
 BtCStatus bt_tree_tick(bt_handle_t tree) {
@@ -136,7 +155,7 @@ BtCStatus bt_tree_tick(bt_handle_t tree) {
         return BT_FAILURE;
     }
     try {
-        return cppStatusToCapi(static_cast<bt::BehaviorTree*>(tree)->tick());
+        return cppStatusToCapi(static_cast<CTree*>(tree)->tree.tick());
     } catch (const std::exception& exc) {
         setError(exc.what());
         return BT_FAILURE;
@@ -146,7 +165,7 @@ BtCStatus bt_tree_tick(bt_handle_t tree) {
 double bt_tree_get_double(bt_handle_t tree, const char* key) {
     if (tree == nullptr || key == nullptr) { return 0.0; }
     try {
-        return static_cast<bt::BehaviorTree*>(tree)->blackboard().get<double>(key);
+        return static_cast<CTree*>(tree)->tree.blackboard().get<double>(key);
     } catch (...) {
         return 0.0;
     }
@@ -155,10 +174,44 @@ double bt_tree_get_double(bt_handle_t tree, const char* key) {
 int bt_tree_get_bool(bt_handle_t tree, const char* key) {
     if (tree == nullptr || key == nullptr) { return 0; }
     try {
-        return static_cast<bt::BehaviorTree*>(tree)->blackboard().get<bool>(key) ? 1 : 0;
+        return static_cast<CTree*>(tree)->tree.blackboard().get<bool>(key) ? 1 : 0;
     } catch (...) {
         return 0;
     }
+}
+
+BtCStatus bt_monitor_start(bt_handle_t tree, int port) {
+    clearError();
+    if (tree == nullptr) {
+        setError("null tree handle passed to bt_monitor_start");
+        return BT_FAILURE;
+    }
+    auto* cTree = static_cast<CTree*>(tree);
+    if (cTree->monitor) { return BT_SUCCESS; }  // already running — idempotent
+    try {
+        cTree->emitter = std::make_unique<bt::DecisionEmitter>();
+        cTree->tree.setEmitter(cTree->emitter.get());
+        cTree->monitor = std::make_unique<bt::MonitorServer>(cTree->tree, *cTree->emitter);
+        cTree->monitor->start(port);
+        return BT_SUCCESS;
+    } catch (const std::exception& exc) {
+        setError(exc.what());
+        cTree->tree.setEmitter(nullptr);
+        cTree->emitter.reset();
+        cTree->monitor.reset();
+        return BT_FAILURE;
+    }
+}
+
+void bt_monitor_stop(bt_handle_t tree) {
+    if (tree == nullptr) { return; }
+    auto* cTree = static_cast<CTree*>(tree);
+    if (cTree->monitor) {
+        cTree->monitor->stop();
+        cTree->monitor.reset();
+    }
+    cTree->tree.setEmitter(nullptr);
+    cTree->emitter.reset();
 }
 
 const char* bt_last_error() {

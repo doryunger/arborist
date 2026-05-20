@@ -97,6 +97,22 @@ BtCStatus bt_tree_tick(bt_handle_t tree);
 double bt_tree_get_double(bt_handle_t tree, const char* key);
 int    bt_tree_get_bool(bt_handle_t tree, const char* key);
 
+// ── Monitor server ────────────────────────────────────────────────────────────
+// Optional live tree viewer — attach once after bt_tree_load(), then keep
+// calling bt_tree_tick() as normal.  Open http://localhost:<port> in a browser
+// while the game is running to see the tree update in real time.
+//
+// bt_monitor_start() is a no-op (returns BT_SUCCESS) if called a second time
+// on the same tree.  bt_monitor_stop() is safe to call even if the monitor was
+// never started.
+
+// Attach a DecisionEmitter and start the HTTP viewer on the given port.
+// Returns BT_FAILURE if tree is nullptr or the port cannot be bound.
+BtCStatus bt_monitor_start(bt_handle_t tree, int port);
+
+// Stop the viewer and detach the emitter.
+void bt_monitor_stop(bt_handle_t tree);
+
 // ── Error reporting ───────────────────────────────────────────────────────────
 
 // Returns the last error message set on this thread, or "" if none.

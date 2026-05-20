@@ -295,3 +295,92 @@ TEST(Phase11_Blackboard, GetOnNullTreeReturnsDefault) {
     EXPECT_DOUBLE_EQ(bt_tree_get_double(nullptr, "key"), 0.0);
     EXPECT_EQ(bt_tree_get_bool(nullptr, "key"), 0);
 }
+
+// ───────────────────────────────────────────────────────────────────────────────
+// Monitor server
+// ───────────────────────────────────────────────────────────────────────────────
+
+TEST(Phase11_Monitor, StartAndStopMonitor) {
+    bt_handle_t reg = bt_registry_create();
+    bt_registry_add_action(reg, "act",
+        [](void* /*ctx*/) -> BtCStatus { return BT_SUCCESS; }, nullptr);
+
+    bt_handle_t tree = bt_tree_load(reg, kSimpleYaml);
+    ASSERT_NE(tree, nullptr);
+
+    EXPECT_EQ(bt_monitor_start(tree, 18086), BT_SUCCESS);
+    EXPECT_EQ(bt_tree_tick(tree), BT_SUCCESS);
+    bt_monitor_stop(tree);
+
+    bt_tree_destroy(tree);
+    bt_registry_destroy(reg);
+}
+
+TEST(Phase11_Monitor, StartIsIdempotent) {
+    bt_handle_t reg = bt_registry_create();
+    bt_registry_add_action(reg, "act",
+        [](void* /*ctx*/) -> BtCStatus { return BT_SUCCESS; }, nullptr);
+
+    bt_handle_t tree = bt_tree_load(reg, kSimpleYaml);
+    ASSERT_NE(tree, nullptr);
+
+    EXPECT_EQ(bt_monitor_start(tree, 18087), BT_SUCCESS);
+    EXPECT_EQ(bt_monitor_start(tree, 18087), BT_SUCCESS);  // second call is a no-op
+    bt_monitor_stop(tree);
+
+    bt_tree_destroy(tree);
+    bt_registry_destroy(reg);
+}
+
+TEST(Phase11_Monitor, StopWithoutStartIsSafe) {
+    bt_handle_t reg = bt_registry_create();
+    bt_registry_add_action(reg, "act",
+        [](void* /*ctx*/) -> BtCStatus { return BT_SUCCESS; }, nullptr);
+
+    bt_handle_t tree = bt_tree_load(reg, kSimpleYaml);
+    ASSERT_NE(tree, nullptr);
+
+    bt_monitor_stop(tree);  // never started — must not crash
+
+    bt_tree_destroy(tree);
+    bt_registry_destroy(reg);
+}
+
+TEST(Phase11_Monitor, NullTreeIsSafe) {
+    EXPECT_EQ(bt_monitor_start(nullptr, 18088), BT_FAILURE);
+    bt_monitor_stop(nullptr);  // must not crash
+}
+
+TEST(Phase11_Monitor, TicksAfterMonitorStartFeedHistory) {
+    bt_handle_t reg = bt_registry_create();
+    bt_registry_add_action(reg, "act",
+        [](void* /*ctx*/) -> BtCStatus { return BT_SUCCESS; }, nullptr);
+
+    bt_handle_t tree = bt_tree_load(reg, kSimpleYaml);
+    ASSERT_NE(tree, nullptr);
+
+    EXPECT_EQ(bt_monitor_start(tree, 18089), BT_SUCCESS);
+    // Three ticks — the monitor should accumulate them without error.
+    for (int idx = 0; idx < 3; ++idx) {
+        EXPECT_EQ(bt_tree_tick(tree), BT_SUCCESS);
+    }
+    bt_monitor_stop(tree);
+
+    bt_tree_destroy(tree);
+    bt_registry_destroy(reg);
+}
+
+TEST(Phase11_Monitor, DestroyWithRunningMonitorIsSafe) {
+    bt_handle_t reg = bt_registry_create();
+    bt_registry_add_action(reg, "act",
+        [](void* /*ctx*/) -> BtCStatus { return BT_SUCCESS; }, nullptr);
+
+    bt_handle_t tree = bt_tree_load(reg, kSimpleYaml);
+    ASSERT_NE(tree, nullptr);
+
+    EXPECT_EQ(bt_monitor_start(tree, 18090), BT_SUCCESS);
+    std::ignore = bt_tree_tick(tree);
+    // Destroy without explicitly stopping — CTree destructor must stop cleanly.
+    bt_tree_destroy(tree);
+    bt_registry_destroy(reg);
+}
