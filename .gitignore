@@ -30,6 +30,18 @@ examples/bt_demo
 examples/bt_smoke
 tests/bt_tests
 
+# Playground runtime files (generated on first run)
+playground/bt_playground_schema.yaml
+playground/bt_playground_registry.db
+
+# Editor runtime files (generated on first run)
+editor/arborist_registry.db
+editor/arborist_schema.yaml
+
+# Stale root-level playground files from early test runs
+bt_playground_schema.yaml
+bt_playground_registry.db
+
 # IDE / tool directories
 .vscode/
 .DS_Store
