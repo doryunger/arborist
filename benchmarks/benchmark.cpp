@@ -10,6 +10,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <span>
+#include <thread>
 #include <cstddef>
 #include <cstdlib>
 #include <fstream>
@@ -29,6 +31,7 @@
 #include "bt/SchemaLoader.h"
 #include "bt/SchemaParser.h"
 #include "bt/Status.h"
+#include "bt/TickPool.h"
 
 // ── Procedural tree generator ─────────────────────────────────────────────────
 
@@ -42,11 +45,11 @@ std::size_t peakRssKb() {
     }
     std::string line;
     while (std::getline(statm, line)) {
-        if (line.rfind("VmRSS:", 0) == 0) {
+        if (line.starts_with("VmRSS:")) {
             std::istringstream iss(line.substr(6));
-            std::size_t kb{0};
-            iss >> kb;
-            return kb;
+            std::size_t kbytes{0};
+            iss >> kbytes;
+            return kbytes;
         }
     }
     return 0;
@@ -161,10 +164,10 @@ Result runScenario(std::string_view name,
             auto doc  = bt::SchemaParser::parse(tmpl.yaml);
             auto tree = bt::SchemaLoader::load(doc, tmpl.reg, {}, partCfg);
             if (useEmitter) {
-                auto em = std::make_unique<bt::DecisionEmitter>(emitterCapacity);
-                em->setCaptureBlackboard(captureBlackboard);
-                tree.setEmitter(em.get());
-                emitters.push_back(std::move(em));
+                auto emitter = std::make_unique<bt::DecisionEmitter>(emitterCapacity);
+                emitter->setCaptureBlackboard(captureBlackboard);
+                tree.setEmitter(emitter.get());
+                emitters.push_back(std::move(emitter));
             }
             agents.push_back(std::move(tree));
         } catch (...) {
@@ -173,7 +176,7 @@ Result runScenario(std::string_view name,
     }
 
     const std::size_t rssBeforeKb = peakRssKb();
-    const auto t0 = std::chrono::high_resolution_clock::now();
+    const auto startTime = std::chrono::high_resolution_clock::now();
 
     std::size_t totalTicks = 0;
     for (std::size_t tick = 0; tick < ticksPerAgent; ++tick) {
@@ -183,12 +186,12 @@ Result runScenario(std::string_view name,
         }
     }
 
-    const auto t1 = std::chrono::high_resolution_clock::now();
+    const auto endTime = std::chrono::high_resolution_clock::now();
     const std::size_t rssAfterKb = peakRssKb();
 
     const double durationMs =
         static_cast<double>(
-            std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count()) /
+            std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime).count()) /
         1000.0;
 
     Result res;
@@ -202,6 +205,61 @@ Result runScenario(std::string_view name,
                          ? (durationMs * 1000.0 / static_cast<double>(totalTicks))
                          : 0.0;
     res.rssKb        = (rssAfterKb > rssBeforeKb) ? (rssAfterKb - rssBeforeKb) : 0;
+    return res;
+}
+
+Result runScenarioThreaded(std::string_view name,
+                            std::size_t numAgents,
+                            std::size_t ticksPerAgent,
+                            std::size_t numBehaviors,
+                            std::size_t nodesPerBehavior,
+                            std::size_t numThreads,
+                            const bt::PartitionConfig& partCfg) {
+    std::mt19937 rng(42);
+
+    std::vector<bt::BehaviorTree> agents;
+    agents.reserve(numAgents);
+
+    for (std::size_t i = 0; i < numAgents; ++i) {
+        auto tmpl = buildAgentTemplate(rng, numBehaviors, nodesPerBehavior);
+        try {
+            auto doc  = bt::SchemaParser::parse(tmpl.yaml);
+            agents.push_back(bt::SchemaLoader::load(doc, tmpl.reg, {}, partCfg));
+        } catch (...) {}
+    }
+
+    bt::TickPool pool{numThreads};
+    for (auto& agent : agents) {
+        pool.addAgent(agent);
+    }
+
+    const std::size_t rssBeforeKb = peakRssKb();
+    const auto startTime = std::chrono::high_resolution_clock::now();
+
+    std::size_t totalTicks = 0;
+    for (std::size_t tick = 0; tick < ticksPerAgent; ++tick) {
+        totalTicks += pool.tickAll();
+    }
+
+    const auto endTime = std::chrono::high_resolution_clock::now();
+    const std::size_t rssAfterKb = peakRssKb();
+
+    const double durationMs =
+        static_cast<double>(
+            std::chrono::duration_cast<std::chrono::microseconds>(endTime - startTime).count()) /
+        1000.0;
+
+    Result res;
+    res.name        = std::string(name);
+    res.totalTicks  = totalTicks;
+    res.durationMs  = durationMs;
+    res.ticksPerSec = (durationMs > 0.0)
+                          ? (static_cast<double>(totalTicks) / (durationMs / 1000.0))
+                          : 0.0;
+    res.usPerTick   = (totalTicks > 0)
+                          ? (durationMs * 1000.0 / static_cast<double>(totalTicks))
+                          : 0.0;
+    res.rssKb       = (rssAfterKb > rssBeforeKb) ? (rssAfterKb - rssBeforeKb) : 0;
     return res;
 }
 
@@ -219,8 +277,9 @@ void printResult(const Result& res) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    const std::size_t numAgents = (argc > 1) ? std::stoul(argv[1]) : 200U;
-    const std::size_t ticksPerAgent = (argc > 2) ? std::stoul(argv[2]) : 3600U;
+    const std::span<char*> args(argv, static_cast<std::size_t>(argc));
+    const std::size_t numAgents = (argc > 1) ? std::stoul(args[1]) : 200U;
+    const std::size_t ticksPerAgent = (argc > 2) ? std::stoul(args[2]) : 3600U;
 
     std::cout << "\n=== bt-framework large-scale benchmark ===\n";
     std::cout << "  agents: " << numAgents
@@ -303,14 +362,39 @@ int main(int argc, char** argv) {
         printResult(res);
     }
 
+    // Multi-threaded: medium tree, no emitter, varying thread count.
+    const std::size_t hwThreads{std::max(
+        std::size_t{1},
+        static_cast<std::size_t>(std::thread::hardware_concurrency()))};
+    const std::vector<std::size_t> threadCounts = [hwThreads] {
+        std::vector<std::size_t> counts{1, 2, 4};
+        if (hwThreads > 4) { counts.push_back(hwThreads); }
+        return counts;
+    }();
+
+    std::cout << "\n";
+    std::cout << std::left  << std::setw(44) << "Multi-threaded (medium-tree, no-emitter)"
+              << std::right << std::setw(16) << "Total ticks"
+              << std::setw(12) << "Throughput"
+              << std::setw(14) << "Latency"
+              << std::setw(8)  << "ΔRSS\n";
+    std::cout << std::string(94, '-') << "\n";
+
+    for (const std::size_t threadCount : threadCounts) {
+        const std::string label =
+            "  " + std::to_string(threadCount) + "-thread(s)";
+        printResult(runScenarioThreaded(
+            label, numAgents, ticksPerAgent, 5, 6, threadCount, noPart));
+    }
+
     std::cout << "\n";
 
     // Summary: ratio of worst vs best.
     if (!results.empty()) {
         const auto [slowIt, fastIt] = std::minmax_element(
             results.begin(), results.end(),
-            [](const Result& a, const Result& b) {
-                return a.ticksPerSec < b.ticksPerSec;
+            [](const Result& lhs, const Result& rhs) {
+                return lhs.ticksPerSec < rhs.ticksPerSec;
             });
         std::cout << "  Fastest: " << fastIt->name
                   << "  (" << std::fixed << std::setprecision(1)
