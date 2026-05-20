@@ -1,6 +1,8 @@
 # Arborist — Behavior Tree Framework
 
-A game-engine-agnostic framework for authoring, executing, monitoring, and automatically testing AI behavior trees. The framework owns the full decision-making pipeline from authoring to analysis; the game engine is reduced to a state provider and command executor.
+Arborist is a game-engine-agnostic C++ framework for building, running, and maintaining AI behavior trees. It covers the full pipeline: behavior authoring, a contract registry that ties designer intent to C++ implementations, a validated runtime with correct RUNNING resumption and configurable interruption, a live browser-based tree viewer, a browser-based visual editor for authoring trees and contracts without touching source files, structural logic analysis that surfaces unreachable branches and impossible policies before the first tick, automated path exploration and scenario testing that requires no engine, and auto-partitioning with lazy subtree instantiation for large trees.
+
+The engine is reduced to a state provider and command executor. Everything above that boundary — what the character does, why, and when — is owned by the framework.
 
 ---
 
