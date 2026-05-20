@@ -43,6 +43,7 @@ file(GLOB_RECURSE BT_SOURCES
     src/monitor/*.cpp
     src/harness/*.cpp
     src/analysis/*.cpp
+    src/adapter/*.cpp
 )
 
 if(BT_SOURCES)

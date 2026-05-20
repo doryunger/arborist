@@ -36,3 +36,8 @@ CheckOptions:
     value: CamelCase
   - key: readability-identifier-naming.EnumConstantCase
     value: UPPER_CASE
+  # C API functions and types use snake_case by convention (extern "C" linkage).
+  - key: readability-identifier-naming.FunctionIgnoredRegex
+    value: "^bt_.*"
+  - key: readability-identifier-naming.TypedefIgnoredRegex
+    value: "^bt_.*"
