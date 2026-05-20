@@ -208,10 +208,11 @@ static constexpr std::string_view kEditorHtml = R"html(<!DOCTYPE html>
 <script>
 const setStatus = s => { document.getElementById('status-bar').textContent = s; };
 
-let treeData = null;
+let treeData   = null;
+let issueMap   = {};   // path -> 'ERROR' | 'WARNING'
 let selectedBehavior = 0;
-let selectedNodeId = null;
-let isDirty = false;
+let selectedNodeId   = null;
+let isDirty    = false;
 let nextNodeId = 0;
 let contractsCache = { actions: [], conditions: [], keys: [] };
 
@@ -433,8 +434,9 @@ async function runAnalysis() {
 
 async function loadTree() {
   try {
-    const res  = await fetch('/api/tree');
-    const data = await res.json();
+    const [treeRes, analyzeRes] = await Promise.all([fetch('/api/tree'), fetch('/api/analyze')]);
+    const data    = await treeRes.json();
+    const analyze = await analyzeRes.json();
     if (data.error) {
       document.getElementById('svg-container').innerHTML =
         `<p style="color:#f38ba8;padding:14px;font-size:11px">Error: ${data.error}</p>`;
@@ -442,6 +444,12 @@ async function loadTree() {
       return;
     }
     treeData = data;
+    // Build issue map: path -> worst severity
+    issueMap = {};
+    for (const issue of (analyze.issues || [])) {
+      const existing = issueMap[issue.path];
+      if (!existing || (issue.severity === 'ERROR')) { issueMap[issue.path] = issue.severity; }
+    }
     nextNodeId = 0;
     function scanIds(node) {
       if (node.id >= nextNodeId) { nextNodeId = node.id + 1; }
@@ -453,7 +461,9 @@ async function loadTree() {
     updateEditPanel(null);
     renderBehaviorTabs();
     renderBehaviorTree(0);
-    setStatus('Tree loaded — ' + (treeData.behaviors||[]).length + ' behavior(s)');
+    const issueCount = Object.keys(issueMap).length;
+    setStatus('Tree loaded — ' + (treeData.behaviors||[]).length + ' behavior(s)' +
+              (issueCount > 0 ? ', ' + issueCount + ' path(s) with issues' : ''));
   } catch (e) {
     document.getElementById('svg-container').innerHTML =
       `<p style="color:#f38ba8;padding:14px;font-size:11px">Failed: ${e.message}</p>`;
@@ -461,11 +471,25 @@ async function loadTree() {
   }
 }
 
+function behaviorIssues(beh) {
+  if (!beh.root) { return ''; }
+  const all = [];
+  function collect(n) { all.push(n); (n.children||[]).forEach(collect); }
+  collect(beh.root);
+  const hasPaths = all.some(n => issueMap[n.path]);
+  const hasRoot  = issueMap['root'];
+  const sev = hasPaths ? (all.some(n => issueMap[n.path] === 'ERROR') ? 'ERROR' : 'WARNING')
+                       : (hasRoot || null);
+  if (!sev) { return ''; }
+  const col = sev === 'ERROR' ? '#f38ba8' : '#fab387';
+  return ` <span style="color:${col};font-size:9px">&#x25CF;</span>`;
+}
+
 function renderBehaviorTabs() {
   if (!treeData) { return; }
   document.getElementById('behavior-tabs').innerHTML =
     (treeData.behaviors||[]).map((beh, idx) =>
-      `<button class="beh-pill${idx === selectedBehavior ? ' active' : ''}" onclick="selectBehavior(${idx})">${beh.name}${beh.condition ? ' ['+beh.condition+']' : ''}</button>`
+      `<button class="beh-pill${idx === selectedBehavior ? ' active' : ''}" onclick="selectBehavior(${idx})">${beh.name}${beh.condition ? ' ['+beh.condition+']' : ''}${behaviorIssues(beh)}</button>`
     ).join('');
 }
 
@@ -693,18 +717,29 @@ function renderBehaviorTree(idx) {
       edges += `<line x1="${node._x}" y1="${node._y+NODE_H}" x2="${child._x}" y2="${child._y}" stroke="#45475a" stroke-width="1.5"/>`;
     }
   }
+  const ISSUE_COLORS = { ERROR: '#f38ba8', WARNING: '#fab387' };
   for (const node of all) {
-    const col  = NODE_COLORS[node.type] || '#cdd6f4';
-    const nx   = node._x - NODE_W / 2;
-    const nm   = (node.name||'').length > 14 ? (node.name||'').slice(0,13)+'…' : (node.name||'');
-    const sel  = node.id === selectedNodeId;
-    const strW = sel ? '2.5' : '1.5';
+    const col     = NODE_COLORS[node.type] || '#cdd6f4';
+    const nx      = node._x - NODE_W / 2;
+    const nm      = (node.name||'').length > 14 ? (node.name||'').slice(0,13)+'…' : (node.name||'');
+    const sel     = node.id === selectedNodeId;
+    const issueSev = issueMap[node.path];
+    const issueCol = issueSev ? ISSUE_COLORS[issueSev] : null;
+    const strW    = sel ? '2.5' : '1.5';
+    if (issueCol) {
+      nodes += `<rect x="${nx-4}" y="${node._y-4}" width="${NODE_W+8}" height="${NODE_H+8}" rx="9" fill="${issueCol}" opacity="0.15"/>`;
+      nodes += `<rect x="${nx-4}" y="${node._y-4}" width="${NODE_W+8}" height="${NODE_H+8}" rx="9" fill="none" stroke="${issueCol}" stroke-width="1.5" opacity="0.6"/>`;
+    }
     if (sel) {
       nodes += `<rect x="${nx-3}" y="${node._y-3}" width="${NODE_W+6}" height="${NODE_H+6}" rx="8" fill="none" stroke="${col}" stroke-width="1" opacity="0.4"/>`;
     }
     nodes += `<rect x="${nx}" y="${node._y}" width="${NODE_W}" height="${NODE_H}" rx="6" fill="#181825" stroke="${col}" stroke-width="${strW}" style="cursor:pointer" onclick="selectNode(${node.id})"/>`;
     nodes += `<text x="${node._x}" y="${node._y+14}" text-anchor="middle" fill="${col}" font-size="9" font-family="monospace" pointer-events="none">${(node.type||'').toUpperCase()}</text>`;
     nodes += `<text x="${node._x}" y="${node._y+29}" text-anchor="middle" fill="#cdd6f4" font-size="11" font-family="monospace" pointer-events="none">${nm}</text>`;
+    if (issueCol) {
+      nodes += `<circle cx="${nx+NODE_W-4}" cy="${node._y+4}" r="5" fill="${issueCol}"/>`;
+      nodes += `<text x="${nx+NODE_W-4}" y="${node._y+8}" text-anchor="middle" fill="#1e1e2e" font-size="8" font-family="monospace" font-weight="bold" pointer-events="none">${issueSev === 'ERROR' ? '!' : '?'}</text>`;
+    }
   }
   document.getElementById('svg-container').innerHTML =
     `<svg width="${svgW}" height="${svgH}">${edges}${nodes}</svg>`;
@@ -891,12 +926,14 @@ std::string_view schemaNodeTypeName(SchemaNodeType type) {
     return "unknown";
 }
 
-std::string schemaNodeToJson(const SchemaNode& node, std::size_t& nextId) {
+std::string schemaNodeToJson(const SchemaNode& node, std::size_t& nextId,
+                              const std::string& path) {
     const std::size_t myId = nextId++;
     std::string out = R"({"id":)";
     out += std::to_string(myId);
     out += R"(,"type":)";   out += jsonString(schemaNodeTypeName(node.type));
     out += R"(,"name":)";   out += jsonString(node.name);
+    out += R"(,"path":)";   out += jsonString(path);
     out += R"(,"intent":)"; out += jsonString(node.intent);
     if (node.type == SchemaNodeType::PARALLEL) {
         std::string_view policyStr = "all";
@@ -908,7 +945,8 @@ std::string schemaNodeToJson(const SchemaNode& node, std::size_t& nextId) {
     out += R"(,"children":[)";
     for (std::size_t idx = 0; idx < node.children.size(); ++idx) {
         if (idx > 0) { out += ','; }
-        out += schemaNodeToJson(*node.children[idx], nextId);
+        out += schemaNodeToJson(*node.children[idx], nextId,
+                                path + "/" + node.children[idx]->name);
     }
     out += "]}";
     return out;
@@ -925,7 +963,7 @@ std::string schemaDocToTreeJson(const SchemaDoc& doc) {
         out += R"(,"interruptible":)"; out += (beh.interruptible ? "true" : "false");
         out += R"(,"root":)";
         if (beh.tree) {
-            out += schemaNodeToJson(*beh.tree, nextId);
+            out += schemaNodeToJson(*beh.tree, nextId, beh.tree->name);
         } else {
             out += "null";
         }

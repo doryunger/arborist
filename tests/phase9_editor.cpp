@@ -4,6 +4,8 @@
 #include <fstream>
 #include <string>
 
+#include <httplib.h>
+
 #include "bt/EditorServer.h"
 #include "bt/RegistryStore.h"
 #include "bt/RegistrySpec.h"
@@ -475,6 +477,49 @@ TEST(Phase9_EditorServer, RemoveStateKeyDeletesFromStore) {
     EXPECT_NE(json.find("ammo_count"),    std::string::npos);
 }
 
+// ── Node paths (Phase 9E) ──────────────────────────────────────────────────────
+
+TEST(Phase9_EditorServer, TreeJsonNodePathIsPresent) {
+    const std::string tmpPath = "/tmp/bt_test_tree_path.yaml";
+    { std::ofstream f(tmpPath); f << kTestSchemaYaml; }
+
+    bt::RegistryStore store(":memory:");
+    populateStore(store);
+    bt::EditorServer editor(store, tmpPath);
+    const std::string json = editor.getTreeJson();
+    EXPECT_NE(json.find("\"path\""), std::string::npos);
+
+    std::filesystem::remove(tmpPath);
+}
+
+TEST(Phase9_EditorServer, TreeJsonRootNodePathIsNodeName) {
+    const std::string tmpPath = "/tmp/bt_test_tree_rootpath.yaml";
+    { std::ofstream f(tmpPath); f << kTestSchemaYaml; }
+
+    bt::RegistryStore store(":memory:");
+    populateStore(store);
+    bt::EditorServer editor(store, tmpPath);
+    const std::string json = editor.getTreeJson();
+    // combat_seq is the root of the "combat" behavior — its path is just its name
+    EXPECT_NE(json.find("\"path\":\"combat_seq\""), std::string::npos);
+
+    std::filesystem::remove(tmpPath);
+}
+
+TEST(Phase9_EditorServer, TreeJsonChildPathIncludesParentName) {
+    const std::string tmpPath = "/tmp/bt_test_tree_childpath.yaml";
+    { std::ofstream f(tmpPath); f << kTestSchemaYaml; }
+
+    bt::RegistryStore store(":memory:");
+    populateStore(store);
+    bt::EditorServer editor(store, tmpPath);
+    const std::string json = editor.getTreeJson();
+    // "attack" is a child of "combat_seq"
+    EXPECT_NE(json.find("combat_seq/attack"), std::string::npos);
+
+    std::filesystem::remove(tmpPath);
+}
+
 // ── HTTP server integration ────────────────────────────────────────────────────
 
 TEST(Phase9_EditorServer, ServerStartsAndServes) {
@@ -485,4 +530,144 @@ TEST(Phase9_EditorServer, ServerStartsAndServes) {
     EXPECT_TRUE(editor.running());
     editor.stop();
     EXPECT_FALSE(editor.running());
+}
+
+TEST(Phase9_EditorServer, HttpIntegration_AllEndpoints) {
+    const std::string tmpPath = "/tmp/bt_test_http_integration.yaml";
+    { std::ofstream f(tmpPath); f << kTestSchemaYaml; }
+
+    bt::RegistryStore store(":memory:");
+    populateStore(store);
+    bt::EditorServer editor(store, tmpPath);
+    editor.start(18084);
+
+    httplib::Client client("localhost", 18084);
+    client.set_connection_timeout(2);
+
+    // ── read endpoints ─────────────────────────────────────────────────────────
+    {
+        auto res = client.Get("/");
+        ASSERT_NE(res, nullptr) << "GET / failed";
+        EXPECT_EQ(res->status, 200);
+        EXPECT_NE(res->body.find("Arborist"), std::string::npos);
+    }
+    {
+        auto res = client.Get("/api/actions");
+        ASSERT_NE(res, nullptr);
+        EXPECT_EQ(res->status, 200);
+        EXPECT_NE(res->body.find("attack"), std::string::npos);
+    }
+    {
+        auto res = client.Get("/api/conditions");
+        ASSERT_NE(res, nullptr);
+        EXPECT_EQ(res->status, 200);
+        EXPECT_NE(res->body.find("enemy_visible"), std::string::npos);
+    }
+    {
+        auto res = client.Get("/api/blackboard");
+        ASSERT_NE(res, nullptr);
+        EXPECT_EQ(res->status, 200);
+        EXPECT_NE(res->body.find("enemy_pos"), std::string::npos);
+    }
+    {
+        auto res = client.Get("/api/schema");
+        ASSERT_NE(res, nullptr);
+        EXPECT_EQ(res->status, 200);
+        EXPECT_NE(res->body.find("schema_version"), std::string::npos);
+    }
+    {
+        auto res = client.Get("/api/analyze");
+        ASSERT_NE(res, nullptr);
+        EXPECT_EQ(res->status, 200);
+        EXPECT_NE(res->body.find("totalNodes"), std::string::npos);
+    }
+    {
+        auto res = client.Get("/api/tree");
+        ASSERT_NE(res, nullptr);
+        EXPECT_EQ(res->status, 200);
+        EXPECT_NE(res->body.find("behaviors"), std::string::npos);
+        EXPECT_NE(res->body.find("\"path\""),  std::string::npos);
+    }
+
+    // ── contract mutation ──────────────────────────────────────────────────────
+    {
+        const std::string body = R"({"name":"http_action","intent":"test","reads":["k1"],"writes":["k2"]})";
+        auto res = client.Put("/api/actions", body, "application/json");
+        ASSERT_NE(res, nullptr);
+        EXPECT_EQ(res->status, 200);
+        EXPECT_NE(res->body.find("ok"), std::string::npos);
+    }
+    {
+        auto res = client.Get("/api/actions");
+        ASSERT_NE(res, nullptr);
+        EXPECT_NE(res->body.find("http_action"), std::string::npos);
+    }
+    {
+        auto res = client.Delete("/api/actions/http_action");
+        ASSERT_NE(res, nullptr);
+        EXPECT_EQ(res->status, 200);
+    }
+    {
+        auto res = client.Get("/api/actions");
+        ASSERT_NE(res, nullptr);
+        EXPECT_EQ(res->body.find("http_action"), std::string::npos);
+    }
+    {
+        const std::string body = R"({"name":"http_cond","intent":"test","reads":[]})";
+        auto res = client.Put("/api/conditions", body, "application/json");
+        ASSERT_NE(res, nullptr);
+        EXPECT_EQ(res->status, 200);
+    }
+    {
+        auto res = client.Delete("/api/conditions/http_cond");
+        ASSERT_NE(res, nullptr);
+        EXPECT_EQ(res->status, 200);
+    }
+    {
+        const std::string body = R"({"key":"http_key","type":"float"})";
+        auto res = client.Put("/api/blackboard", body, "application/json");
+        ASSERT_NE(res, nullptr);
+        EXPECT_EQ(res->status, 200);
+    }
+    {
+        auto res = client.Delete("/api/blackboard/http_key");
+        ASSERT_NE(res, nullptr);
+        EXPECT_EQ(res->status, 200);
+    }
+
+    // ── schema save + reload ───────────────────────────────────────────────────
+    {
+        const std::string newYaml =
+            "schema_version: \"1.0\"\nbehaviors:\n"
+            "  - name: patrol\n    tree:\n      type: action\n      name: walk_waypoint\n";
+        const std::string body = "{\"yaml\":\"" +
+            [&]{ std::string escaped; for (char chr : newYaml) {
+                if (chr == '"') { escaped += "\\\""; }
+                else if (chr == '\n') { escaped += "\\n"; }
+                else { escaped += chr; }
+            } return escaped; }() + "\"}";
+        auto res = client.Post("/api/schema", body, "application/json");
+        ASSERT_NE(res, nullptr);
+        EXPECT_EQ(res->status, 200);
+    }
+    {
+        auto res = client.Get("/api/schema");
+        ASSERT_NE(res, nullptr);
+        EXPECT_NE(res->body.find("patrol"), std::string::npos);
+    }
+
+    // ── bad request validation ─────────────────────────────────────────────────
+    {
+        auto res = client.Put("/api/actions", R"({"intent":"no name"})", "application/json");
+        ASSERT_NE(res, nullptr);
+        EXPECT_EQ(res->status, 400);
+    }
+    {
+        auto res = client.Post("/api/schema", R"({"yaml":"invalid: yaml: :::"})", "application/json");
+        ASSERT_NE(res, nullptr);
+        EXPECT_EQ(res->status, 422);
+    }
+
+    editor.stop();
+    std::filesystem::remove(tmpPath);
 }
