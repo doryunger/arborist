@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <deque>
 #include <optional>
 #include <string>
 #include <vector>
@@ -18,7 +19,7 @@ struct ScenarioStepResult {
 };
 
 struct ScenarioResult {
-    std::vector<TickRecord> history;
+    std::deque<TickRecord> history;
     std::vector<ScenarioStepResult> stepResults;
     Status finalStatus{Status::RUNNING};
     std::size_t ticksRun{0};

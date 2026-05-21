@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <string>
 #include <tuple>
 
@@ -381,6 +382,82 @@ TEST(Phase11_Monitor, DestroyWithRunningMonitorIsSafe) {
     EXPECT_EQ(bt_monitor_start(tree, 18090), BT_SUCCESS);
     std::ignore = bt_tree_tick(tree);
     // Destroy without explicitly stopping — CTree destructor must stop cleanly.
+    bt_tree_destroy(tree);
+    bt_registry_destroy(reg);
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+// Extended blackboard types — int32 and string
+// ───────────────────────────────────────────────────────────────────────────────
+
+TEST(Phase11_Blackboard, Int32SourceReadableAfterTick) {
+    std::int32_t score = 42;
+    bt_handle_t reg = bt_registry_create();
+
+    bt_registry_add_int32_source(reg, "score",
+        [](void* ctx) -> int32_t { return *static_cast<std::int32_t*>(ctx); },
+        &score);
+    bt_registry_add_action(reg, "act",
+        [](void* /*ctx*/) -> BtCStatus { return BT_SUCCESS; }, nullptr);
+
+    bt_handle_t tree = bt_tree_load(reg, kSimpleYaml);
+    ASSERT_NE(tree, nullptr) << bt_last_error();
+
+    std::ignore = bt_tree_tick(tree);
+    EXPECT_EQ(bt_tree_get_int32(tree, "score"), 42);
+
+    score = -7;
+    std::ignore = bt_tree_tick(tree);
+    EXPECT_EQ(bt_tree_get_int32(tree, "score"), -7);
+
+    bt_tree_destroy(tree);
+    bt_registry_destroy(reg);
+}
+
+TEST(Phase11_Blackboard, Int32MissingKeyReturnsZero) {
+    bt_handle_t reg = bt_registry_create();
+    bt_registry_add_action(reg, "act",
+        [](void* /*ctx*/) -> BtCStatus { return BT_SUCCESS; }, nullptr);
+    bt_handle_t tree = bt_tree_load(reg, kSimpleYaml);
+    ASSERT_NE(tree, nullptr);
+    EXPECT_EQ(bt_tree_get_int32(tree, "no_such_key"), 0);
+    EXPECT_EQ(bt_tree_get_int32(nullptr, "key"), 0);
+    bt_tree_destroy(tree);
+    bt_registry_destroy(reg);
+}
+
+TEST(Phase11_Blackboard, StringSourceReadableAfterTick) {
+    const char* state = "idle";
+    bt_handle_t reg = bt_registry_create();
+
+    bt_registry_add_string_source(reg, "agent_state",
+        [](void* ctx) -> const char* { return *static_cast<const char**>(ctx); },
+        &state);
+    bt_registry_add_action(reg, "act",
+        [](void* /*ctx*/) -> BtCStatus { return BT_SUCCESS; }, nullptr);
+
+    bt_handle_t tree = bt_tree_load(reg, kSimpleYaml);
+    ASSERT_NE(tree, nullptr) << bt_last_error();
+
+    std::ignore = bt_tree_tick(tree);
+    EXPECT_STREQ(bt_tree_get_string(tree, "agent_state"), "idle");
+
+    state = "attacking";
+    std::ignore = bt_tree_tick(tree);
+    EXPECT_STREQ(bt_tree_get_string(tree, "agent_state"), "attacking");
+
+    bt_tree_destroy(tree);
+    bt_registry_destroy(reg);
+}
+
+TEST(Phase11_Blackboard, StringMissingKeyReturnsEmpty) {
+    bt_handle_t reg = bt_registry_create();
+    bt_registry_add_action(reg, "act",
+        [](void* /*ctx*/) -> BtCStatus { return BT_SUCCESS; }, nullptr);
+    bt_handle_t tree = bt_tree_load(reg, kSimpleYaml);
+    ASSERT_NE(tree, nullptr);
+    EXPECT_STREQ(bt_tree_get_string(tree, "no_such_key"), "");
+    EXPECT_STREQ(bt_tree_get_string(nullptr, "key"), "");
     bt_tree_destroy(tree);
     bt_registry_destroy(reg);
 }

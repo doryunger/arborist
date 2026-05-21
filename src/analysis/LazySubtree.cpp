@@ -1,6 +1,7 @@
 #include "bt/LazySubtree.h"
 
 #include <cassert>
+#include <stdexcept>
 
 namespace bt {
 
@@ -21,8 +22,17 @@ void LazySubtree::reset() {
 }
 
 Status LazySubtree::doTick() {
+    if (!factoryError_.empty()) { return Status::FAILURE; }
     if (children_.empty()) {
-        children_.push_back(factory_());
+        try {
+            children_.push_back(factory_());
+        } catch (const std::exception& exc) {
+            factoryError_ = exc.what();
+            return Status::FAILURE;
+        } catch (...) {
+            factoryError_ = "unknown error during LazySubtree materialization";
+            return Status::FAILURE;
+        }
     }
     return children_[0]->tick();
 }

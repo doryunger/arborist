@@ -14,7 +14,7 @@ void DecisionEmitter::record(std::size_t tickNumber, std::string behaviorName, S
     }
 
     if (capacity_ > 0 && history_.size() >= capacity_) {
-        history_.erase(history_.begin());
+        history_.pop_front();
     }
     history_.push_back(std::move(rec));
 }

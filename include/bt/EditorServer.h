@@ -4,7 +4,9 @@
 #include <string>
 #include <string_view>
 
+#include "bt/BehaviorTree.h"
 #include "bt/RegistryStore.h"
+#include "bt/SchemaLoader.h"
 
 namespace bt {
 
@@ -21,7 +23,8 @@ namespace bt {
 //   GET  /api/conditions — all declared conditions as JSON
 //   GET  /api/blackboard — all declared blackboard keys as JSON
 //   GET  /api/schema     — current schema YAML wrapped in JSON
-//   POST /api/schema     — save updated schema YAML to disk
+//   POST /api/schema     — save updated schema YAML to disk; reloads
+//                          the attached tree if one was set via attachTree()
 //   GET  /api/analyze    — run ComplexityAnalyzer; returns issues + metrics
 class EditorServer {
 public:
@@ -41,6 +44,19 @@ public:
 
     [[nodiscard]] bool running() const noexcept { return running_; }
 
+    // Wire a live BehaviorTree to the editor so that every successful schema
+    // save also hot-reloads the running tree. The registry is needed to
+    // rebuild the tree from the new YAML. Both pointers must outlive the
+    // EditorServer. Pass nullptr to detach.
+    // If the new schema fails to load (e.g. unknown action name), the save
+    // still succeeds but the running tree is left unchanged.
+    void attachTree(BehaviorTree* tree, const LoaderRegistry& reg) noexcept;
+
+    // Wire a DecisionEmitter so that GET /api/tickstate returns the latest
+    // tick record (active behavior + active-path nodes with statuses).
+    // Pointer must outlive the EditorServer. Pass nullptr to detach.
+    void attachEmitter(DecisionEmitter* emitter) noexcept;
+
     // Direct data accessors — return the same JSON the HTTP endpoints serve.
     // Useful for tests without starting the HTTP server.
     [[nodiscard]] std::string getActionsJson()    const;
@@ -49,10 +65,14 @@ public:
     [[nodiscard]] std::string getSchemaJson()     const;
     [[nodiscard]] std::string getAnalyzeJson()    const;
     [[nodiscard]] std::string getTreeJson()       const;
+    // Returns the most recent TickRecord as JSON, or an empty-state object
+    // if no emitter is attached or no ticks have been recorded yet.
+    [[nodiscard]] std::string getTickStateJson()  const;
 
-    // Save schema YAML to the configured file path.
+    // Save schema YAML to the configured file path. If a tree is attached via
+    // attachTree(), also rebuilds and hot-swaps it from the new YAML.
     // Returns true on success, false if no path is configured or write fails.
-    [[nodiscard]] bool saveSchema(std::string_view yaml) const;
+    [[nodiscard]] bool saveSchema(std::string_view yaml);
 
     // Contract authoring — mutate the RegistryStore directly.
     void putAction(std::string_view name, std::string_view intent,
@@ -66,9 +86,12 @@ public:
     void removeStateKey(std::string_view key);
 
 private:
-    RegistryStore* store_;
-    std::string          schemaPath_;
-    bool                 running_{false};
+    RegistryStore*        store_;
+    std::string           schemaPath_;
+    bool                  running_{false};
+    BehaviorTree*         attachedTree_{nullptr};
+    const LoaderRegistry* attachedReg_{nullptr};
+    DecisionEmitter*      attachedEmitter_{nullptr};
 
     struct Impl;
     std::unique_ptr<Impl> impl_;

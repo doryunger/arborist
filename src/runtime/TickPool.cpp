@@ -11,6 +11,7 @@ namespace {
 
 struct WorkerSlot {
     std::vector<BehaviorTree*> agents;
+    std::vector<TickPool::AgentError> errors;
     std::mutex mu;
     std::condition_variable cv;
     bool shouldTick{false};
@@ -25,10 +26,15 @@ void runWorker(WorkerSlot* slot) {
         slot->cv.wait(lock, [slot] { return slot->shouldTick || slot->stop; });
         if (slot->stop) { return; }
         slot->shouldTick = false;
+        slot->errors.clear();
         lock.unlock();
 
         for (auto* tree : slot->agents) {
-            tree->tick();
+            try {
+                tree->tick();
+            } catch (...) {
+                slot->errors.push_back({ tree, std::current_exception() });
+            }
         }
 
         {
@@ -48,6 +54,7 @@ struct TickPool::Impl {
     Impl& operator=(Impl&&) = delete;
 
     std::vector<std::unique_ptr<WorkerSlot>> workers;
+    std::vector<AgentError> lastErrors;
     std::size_t agentCount{0};
     std::size_t nextWorkerIdx{0};
 
@@ -92,6 +99,8 @@ void TickPool::addAgent(BehaviorTree& tree) {
 }
 
 std::size_t TickPool::tickAll() {
+    impl_->lastErrors.clear();
+
     for (auto& worker : impl_->workers) {
         if (worker->agents.empty()) { continue; }
         {
@@ -106,9 +115,16 @@ std::size_t TickPool::tickAll() {
         if (worker->agents.empty()) { continue; }
         std::unique_lock<std::mutex> lock(worker->mu);
         worker->cv.wait(lock, [&worker] { return worker->tickDone; });
+        for (auto& err : worker->errors) {
+            impl_->lastErrors.push_back(err);
+        }
     }
 
     return impl_->agentCount;
+}
+
+const std::vector<TickPool::AgentError>& TickPool::lastErrors() const noexcept {
+    return impl_->lastErrors;
 }
 
 std::size_t TickPool::size() const noexcept { return impl_->agentCount; }

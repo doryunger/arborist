@@ -59,8 +59,24 @@ This project targets **C++20**. Always use the most modern and safest syntax ava
 
 clang-tidy enforces these rules at build time with `WarningsAsErrors`.
 
+## Quality standard
+
+**Do what is right, not what is easy.** This is a non-negotiable rule.
+
+A feature is not done when it compiles and passes a happy-path test. It is done when:
+- Edge cases and failure paths are handled
+- It integrates correctly with every component that depends on it
+- It has been tested at the boundary (null inputs, empty state, concurrent access where applicable)
+- It does not leave a known gap that a user will fall into
+
+If a component has a known gap, that gap must be tracked and closed — not worked around, not deferred indefinitely, not documented as "future work" and forgotten. Half-baked components make the whole framework untrustworthy.
+
+Before marking any phase complete, explicitly ask: *what would break this in production?* If the answer is non-trivial, the phase is not complete.
+
 ## What not to do
 
 - Do not add features beyond what the current step requires
 - Do not refactor previous steps while implementing a new one
 - Do not skip the test — if it's hard to test, the design is probably wrong
+- Do not declare a component "done" when it only handles the happy path
+- Do not build two components that must work together as if they are independent

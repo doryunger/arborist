@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -246,4 +247,79 @@ TEST(Phase10_Emitter, IsolationPerAgent) {
             EXPECT_EQ(rec.behaviorName, expected);
         }
     }
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+// Exception isolation — a throwing agent must not crash other agents
+// ───────────────────────────────────────────────────────────────────────────────
+
+TEST(Phase10_ExceptionIsolation, ThrowingAgentDoesNotCrashPool) {
+    auto healthy = makeTree("healthy", []() { return bt::Status::SUCCESS; });
+    auto broken  = makeTree("broken",  []() -> bt::Status {
+        throw std::runtime_error("agent on fire");
+    });
+
+    bt::TickPool pool{2};
+    pool.addAgent(healthy);
+    pool.addAgent(broken);
+
+    // tickAll must not propagate the exception — it returns normally
+    EXPECT_NO_THROW(std::ignore = pool.tickAll());
+}
+
+TEST(Phase10_ExceptionIsolation, HealthyAgentStillTicksAfterNeighbourThrows) {
+    int healthyTicks = 0;
+    auto healthy = makeTree("healthy", [&healthyTicks] {
+        ++healthyTicks;
+        return bt::Status::SUCCESS;
+    });
+    auto broken = makeTree("broken", []() -> bt::Status {
+        throw std::runtime_error("broken");
+    });
+
+    bt::TickPool pool{1};   // single thread: both on same worker
+    pool.addAgent(healthy);
+    pool.addAgent(broken);
+
+    constexpr int kRounds = 3;
+    for (int round = 0; round < kRounds; ++round) {
+        std::ignore = pool.tickAll();
+    }
+    EXPECT_EQ(healthyTicks, kRounds);
+}
+
+TEST(Phase10_ExceptionIsolation, ErrorsAccessibleAfterTickAll) {
+    auto broken = makeTree("broken", [] -> bt::Status {
+        throw std::runtime_error("deliberate");
+    });
+
+    bt::TickPool pool{1};
+    pool.addAgent(broken);
+    std::ignore = pool.tickAll();
+
+    const auto errors = pool.lastErrors();
+    ASSERT_EQ(errors.size(), 1U);
+    EXPECT_NE(errors[0].error, nullptr);
+    try {
+        std::rethrow_exception(errors[0].error);
+    } catch (const std::runtime_error& exc) {
+        EXPECT_STREQ(exc.what(), "deliberate");
+    }
+}
+
+TEST(Phase10_ExceptionIsolation, ErrorsAreClearedEachRound) {
+    int callCount = 0;
+    auto flaky = makeTree("flaky", [&callCount]() -> bt::Status {
+        if (++callCount == 1) { throw std::runtime_error("first tick only"); }
+        return bt::Status::SUCCESS;
+    });
+
+    bt::TickPool pool{1};
+    pool.addAgent(flaky);
+
+    std::ignore = pool.tickAll();
+    EXPECT_EQ(pool.lastErrors().size(), 1U);
+
+    std::ignore = pool.tickAll();   // second round: no exception
+    EXPECT_EQ(pool.lastErrors().size(), 0U);
 }

@@ -312,7 +312,36 @@ Without this, a RUNNING sequence containing two action nodes could observe diffe
 
 The `sources_` map stores `std::function<std::any()>` — the source lambda is wrapped to return `std::any`. The `values_` map stores `std::any`. This avoids template specialisation throughout the framework; the Blackboard does not need to know what types are stored.
 
-The cost is runtime type checking in `get<T>()` — `std::any_cast` throws if the type does not match. This is acceptable because the blackboard is a config-time contract: the type registered with `registerSource<double>` must match what the code calls `get<double>` for. A mismatch is a programming error caught during development, not a runtime condition that needs graceful handling.
+### typeRegistry_ — type enforcement at write time
+
+```cpp
+std::unordered_map<std::string, std::type_index> typeRegistry_;
+
+template <typename T>
+void enforceType(const std::string& key) {
+    const std::type_index tid(typeid(T));
+    auto [it, inserted] = typeRegistry_.emplace(key, tid);
+    if (!inserted && it->second != tid) {
+        throw std::runtime_error(
+            "Blackboard type conflict for key '" + key + "'...");
+    }
+}
+```
+
+`set<T>()` and `registerSource<T>()` both call `enforceType<T>()` before writing. The first call for a key registers the type; every subsequent call checks it. This converts a silent runtime failure (a `std::bad_any_cast` from a deep tick call stack with no context) into an immediate, named error at the point of misuse.
+
+`get<T>()` consults `typeRegistry_` before calling `std::any_cast`:
+
+```cpp
+const auto regIt = typeRegistry_.find(key);
+if (regIt != typeRegistry_.end() &&
+    regIt->second != std::type_index(typeid(T))) {
+    throw std::runtime_error(
+        "Blackboard type mismatch for key '" + key + "'...");
+}
+```
+
+The check is a map lookup (O(1)) and a `type_index` comparison, both extremely cheap relative to the surrounding tick work. If the key has no registered type (possible if it was populated via a path that pre-dates the type registry, or from external data), the cast proceeds normally.
 
 ---
 
@@ -724,3 +753,34 @@ This is why the affinity guarantee matters: if a tree could hop between threads,
 ### Shutdown
 
 When `TickPool::~TickPool()` runs (via `Impl`'s destructor), it sets `stop = true` on each slot and notifies the condition variable. The worker loop's predicate wakes up, sees `stop`, and returns, ending the thread. Then `thread.join()` waits for clean exit. This guarantees no worker thread accesses a destroyed `WorkerSlot` after the destructor completes.
+
+### Exception isolation
+
+Without isolation, a single throwing behavior in one agent would unwind the worker thread's stack, skip all remaining agents in the slot, and leave `tickDone` unset — causing `tickAll()` to hang forever waiting on the condition variable.
+
+The worker loop wraps each tree tick in a per-agent try-catch:
+
+```cpp
+for (auto* tree : slot->agents) {
+    try {
+        tree->tick();
+    } catch (const std::exception& e) {
+        std::lock_guard guard(impl_->errorMu);
+        impl_->lastErrors.push_back({ tree, e.what() });
+    } catch (...) {
+        std::lock_guard guard(impl_->errorMu);
+        impl_->lastErrors.push_back({ tree, "unknown exception" });
+    }
+}
+```
+
+Each exception is caught, wrapped in an `AgentError` struct (`{BehaviorTree* agent; std::string message}`), and appended to `lastErrors_` under a mutex. The worker continues to the next agent. At the end of the frame, `tickAll()` returns normally and the caller can inspect errors:
+
+```cpp
+pool.tickAll();
+for (const auto& err : pool.lastErrors()) {
+    log("agent error: " + err.message);
+}
+```
+
+`lastErrors()` is cleared at the start of each `tickAll()` call, so it always reflects only the most recent frame's failures. An agent that throws once is ticked normally on subsequent frames — the error is reported, not permanent.

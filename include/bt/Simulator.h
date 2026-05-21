@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <deque>
 #include <functional>
 #include <unordered_map>
 #include <vector>
@@ -12,7 +13,7 @@
 namespace bt {
 
 struct SimulatorResult {
-    std::vector<TickRecord> history;
+    std::deque<TickRecord> history;
     Status finalStatus{Status::RUNNING};
     std::size_t ticksRun{0};
 };

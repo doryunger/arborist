@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <any>
+#include <deque>
 #include <string>
 
 #include "bt/ContractValidator.h"
@@ -209,7 +210,7 @@ TEST(ScenarioRunner, IntegrationScenario_PatrolThenAttackThenStop) {
 // Helpers: build ScenarioResult directly from known tick records so the
 // validator tests stay focused on contract logic, not tree setup.
 
-static bt::ScenarioResult makeResult(std::vector<bt::TickRecord> records) {
+static bt::ScenarioResult makeResult(std::deque<bt::TickRecord> records) {
     bt::ScenarioResult result;
     result.history = std::move(records);
     result.ticksRun = result.history.size();

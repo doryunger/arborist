@@ -414,6 +414,29 @@ For values you want to set explicitly (not via a source lambda):
 board.set<int>("wave_number", 3);
 ```
 
+### Type safety
+
+Once a key is written — either via `set<T>()` or `registerSource<T>()` — the framework records its type. Any subsequent call for that key with a different type throws `std::runtime_error` immediately:
+
+```cpp
+board.set<int>("health", 100);
+board.set<float>("health", 100.0f);   // throws: "Blackboard type conflict for key 'health'..."
+```
+
+```cpp
+board.registerSource<bool>("enemy_near", [&] { return sensor.nearbyEnemy(); });
+board.get<int>("enemy_near");          // throws: "Blackboard type mismatch for key 'enemy_near'..."
+```
+
+Both error messages include the key name and the conflicting type names, making the source of the bug immediately clear. This replaces the opaque `std::bad_any_cast` that would otherwise appear at an arbitrary point during a live tick.
+
+The same type registered again is always allowed — updating a value or swapping a source lambda of the same type is fine:
+
+```cpp
+board.set<int>("health", 100);
+board.set<int>("health", 95);   // OK — same type, updated value
+```
+
 ### Manual refresh
 
 `BehaviorTree::tick()` calls `board.refresh()` automatically before each tick. If you use the `Blackboard` independently, call `refresh()` yourself:
@@ -634,6 +657,45 @@ editor.start(8081);   // non-blocking
 editor.stop();
 ```
 
+### Attaching a live tree for hot-reload
+
+When the EditorServer is running alongside a live game loop, call `attachTree()` to wire the schema editor directly to the running tree. Every time `POST /api/schema` succeeds, the framework rebuilds the tree from the new YAML and calls `BehaviorTree::reload()` without interrupting the game loop:
+
+```cpp
+bt::RegistryStore store("project.db");
+bt::EditorServer editor(store, "npc_guard.yaml");
+
+// Build tree from the same schema
+bt::LoaderRegistry loaderReg;
+loaderReg.actions["patrol"] = [&world] { world.patrol(); return bt::Status::RUNNING; };
+loaderReg.actions["attack"] = [&world] { world.attack(); return bt::Status::RUNNING; };
+auto tree = bt::SchemaLoader::load(kYaml, loaderReg);
+
+// Wire the editor to the live tree
+editor.attachTree(&tree, loaderReg);
+
+editor.start(8081);
+
+// Saving schema in the browser now hot-reloads 'tree' automatically
+```
+
+If the new schema references an action not in `loaderReg`, the file is saved but the live tree is left unchanged — no crash, no interruption.
+
+### Attaching a DecisionEmitter for live tick overlay
+
+When `attachEmitter()` is called, the editor's graph view overlays which nodes ran on the most recent tick, color-coded by status. The overlay updates every 500 ms via `GET /api/tickstate`:
+
+```cpp
+bt::DecisionEmitter emitter(512);   // ring buffer of 512 records
+tree.setEmitter(&emitter);
+
+editor.attachEmitter(&emitter);
+editor.start(8081);
+// Open http://localhost:8081 — active nodes now glow in the graph
+```
+
+Both `attachTree()` and `attachEmitter()` accept `nullptr` to detach. Pointers must remain valid for the lifetime of the `EditorServer`.
+
 ### REST API
 
 | Method | Endpoint | Description |
@@ -643,8 +705,16 @@ editor.stop();
 | `GET` | `/api/conditions` | All registered conditions (JSON) |
 | `GET` | `/api/blackboard` | All declared blackboard keys (JSON) |
 | `GET` | `/api/schema` | Current schema YAML wrapped in JSON |
-| `POST` | `/api/schema` | Save updated schema YAML to disk |
+| `POST` | `/api/schema` | Save schema YAML; hot-reloads attached tree |
+| `GET` | `/api/tree` | Full tree as structured JSON with node IDs and paths |
 | `GET` | `/api/analyze` | Run `ComplexityAnalyzer`; returns issues + metrics |
+| `GET` | `/api/tickstate` | Latest tick record — tick number, behavior, active path |
+| `PUT` | `/api/actions/:name` | Upsert an action contract |
+| `DELETE` | `/api/actions/:name` | Remove an action contract |
+| `PUT` | `/api/conditions/:name` | Upsert a condition contract |
+| `DELETE` | `/api/conditions/:name` | Remove a condition contract |
+| `PUT` | `/api/blackboard/:key` | Upsert a blackboard key declaration |
+| `DELETE` | `/api/blackboard/:key` | Remove a blackboard key declaration |
 
 ### Programmatic contract authoring
 
@@ -917,6 +987,29 @@ pool.size();          // number of registered agents
 pool.threadCount();   // number of worker threads
 ```
 
+### Exception isolation
+
+If a tree's action or condition lambda throws, the exception is caught per agent and stored. Other trees in the pool continue ticking normally:
+
+```cpp
+// After tickAll(), check for errors
+const auto& errors = pool.lastErrors();
+for (const auto& err : errors) {
+    try {
+        std::rethrow_exception(err.error);
+    } catch (const std::exception& exc) {
+        std::cerr << "agent error: " << exc.what() << "\n";
+        // re-register, reset, or remove the offending tree
+    }
+}
+```
+
+`lastErrors()` returns `const std::vector<TickPool::AgentError>&`. Each entry holds:
+- `tree` — pointer to the tree that threw
+- `error` — `std::exception_ptr` you can rethrow and inspect
+
+Errors are cleared at the start of every `tickAll()`, so the vector always reflects only the most recent tick round.
+
 ### Thread-safety requirements
 
 - Call `addAgent()` for all trees before the first `tickAll()`.
@@ -987,6 +1080,20 @@ bt_registry_add_bool_source(reg, "is_alert",
         return ((MyNPC*)ctx)->isAlert ? 1 : 0;
     },
     myNpcPtr);
+
+// int32 source (e.g. ammo count, wave number)
+bt_registry_add_int32_source(reg, "ammo_count",
+    [](void* ctx) -> int32_t {
+        return ((MyNPC*)ctx)->ammo;
+    },
+    myNpcPtr);
+
+// String source (e.g. current target tag)
+bt_registry_add_string_source(reg, "target_tag",
+    [](void* ctx) -> const char* {
+        return ((MyNPC*)ctx)->targetTag.c_str();
+    },
+    myNpcPtr);
 ```
 
 #### 3. Load the tree
@@ -1017,8 +1124,10 @@ BtCStatus result = bt_tree_tick(tree);
 #### 6. Read blackboard values
 
 ```c
-double health = bt_tree_get_double(tree, "health");
-int    alert  = bt_tree_get_bool(tree, "is_alert");
+double      health    = bt_tree_get_double(tree, "health");
+int         alert     = bt_tree_get_bool(tree,   "is_alert");
+int32_t     ammo      = bt_tree_get_int32(tree,  "ammo_count");
+const char* tag       = bt_tree_get_string(tree, "target_tag");  // valid until next C API call on this thread
 ```
 
 #### 7. Shut down

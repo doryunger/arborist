@@ -1,5 +1,6 @@
 #include "bt/capi.h"
 
+#include <cstdint>
 #include <memory>
 #include <string>
 
@@ -15,6 +16,8 @@ namespace {
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 thread_local std::string tlLastError;
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+thread_local std::string tlStringResult;
 
 void setError(const std::string& msg) noexcept {
     try { tlLastError = msg; } catch (...) {}
@@ -129,6 +132,25 @@ void bt_registry_add_bool_source(bt_handle_t reg, const char* key,
     });
 }
 
+void bt_registry_add_int32_source(bt_handle_t reg, const char* key,
+                                   bt_int32_source_fn_t func, void* ctx) {
+    if (reg == nullptr || key == nullptr || func == nullptr) { return; }
+    auto& cReg = *static_cast<CRegistry*>(reg);
+    cReg.blackboard.registerSource<std::int32_t>(key, [func, ctx] {
+        return func(ctx);
+    });
+}
+
+void bt_registry_add_string_source(bt_handle_t reg, const char* key,
+                                    bt_string_source_fn_t func, void* ctx) {
+    if (reg == nullptr || key == nullptr || func == nullptr) { return; }
+    auto& cReg = *static_cast<CRegistry*>(reg);
+    cReg.blackboard.registerSource<std::string>(key, [func, ctx]() -> std::string {
+        const char* ptr = func(ctx);
+        return ptr != nullptr ? std::string(ptr) : std::string{};
+    });
+}
+
 bt_handle_t bt_tree_load(bt_handle_t reg, const char* yaml) {
     clearError();
     if (reg == nullptr || yaml == nullptr) {
@@ -180,6 +202,25 @@ int bt_tree_get_bool(bt_handle_t tree, const char* key) {
     }
 }
 
+int32_t bt_tree_get_int32(bt_handle_t tree, const char* key) {
+    if (tree == nullptr || key == nullptr) { return 0; }
+    try {
+        return static_cast<CTree*>(tree)->tree.blackboard().get<std::int32_t>(key);
+    } catch (...) {
+        return 0;
+    }
+}
+
+const char* bt_tree_get_string(bt_handle_t tree, const char* key) {
+    if (tree == nullptr || key == nullptr) { return ""; }
+    try {
+        tlStringResult = static_cast<CTree*>(tree)->tree.blackboard().get<std::string>(key);
+        return tlStringResult.c_str();
+    } catch (...) {
+        return "";
+    }
+}
+
 BtCStatus bt_monitor_start(bt_handle_t tree, int port) {
     clearError();
     if (tree == nullptr) {
@@ -189,7 +230,10 @@ BtCStatus bt_monitor_start(bt_handle_t tree, int port) {
     auto* cTree = static_cast<CTree*>(tree);
     if (cTree->monitor) { return BT_SUCCESS; }  // already running — idempotent
     try {
-        cTree->emitter = std::make_unique<bt::DecisionEmitter>();
+        // Default capacity of 4096 records prevents unbounded growth during
+        // long game sessions. Callers needing a different size can stop/start
+        // with a custom emitter via the C++ API directly.
+        cTree->emitter = std::make_unique<bt::DecisionEmitter>(4096);
         cTree->tree.setEmitter(cTree->emitter.get());
         cTree->monitor = std::make_unique<bt::MonitorServer>(cTree->tree, *cTree->emitter);
         cTree->monitor->start(port);

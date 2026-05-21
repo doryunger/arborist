@@ -2,6 +2,7 @@
 
 #include <any>
 #include <cstddef>
+#include <deque>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -43,13 +44,13 @@ public:
     void setCaptureBlackboard(bool capture) noexcept { captureBlackboard_ = capture; }
     [[nodiscard]] bool capturesBlackboard() const noexcept { return captureBlackboard_; }
 
-    [[nodiscard]] const std::vector<TickRecord>& history() const noexcept { return history_; }
+    [[nodiscard]] const std::deque<TickRecord>& history() const noexcept { return history_; }
     void clear() noexcept { history_.clear(); }
 
 private:
-    std::vector<TickRecord> history_;
-    std::size_t             capacity_{0};
-    bool                    captureBlackboard_{true};
+    std::deque<TickRecord> history_;
+    std::size_t            capacity_{0};
+    bool                   captureBlackboard_{true};
 };
 
 }  // namespace bt
