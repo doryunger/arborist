@@ -170,6 +170,13 @@ bt_registry_destroy(reg);
 
 Supported blackboard types: `bool`, `float`, `int32`, `string`.
 
+**Unity / IL2CPP note:** callbacks passed to native code must be marked `[MonoPInvokeCallback]` or they will crash in IL2CPP builds (standalone, mobile). This works without the attribute in the Unity Editor but will silently break in a build.
+
+```csharp
+[MonoPInvokeCallback(typeof(BtActionFn))]
+static int PatrolAction(IntPtr bb) { ... }
+```
+
 ---
 
 ## Hot-reload
