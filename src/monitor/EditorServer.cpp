@@ -180,10 +180,6 @@ static constexpr std::string_view kEditorHtml = R"html(<!DOCTYPE html>
             <div id="edit-add-child" style="display:none;margin-top:4px">
               <button style="width:100%" onclick="addChildToSelected()">+ Add Child</button>
             </div>
-            <div id="edit-move-row" class="edit-row" style="display:none;margin-top:4px">
-              <button onclick="moveSelectedNode(-1)">&#x2190; Left</button>
-              <button onclick="moveSelectedNode(1)">Right &#x2192;</button>
-            </div>
             <div id="edit-reg-section" style="display:none"></div>
             <div id="edit-prev-section" style="display:none">
               <h2>Previous Values</h2>
@@ -209,8 +205,11 @@ let selectedBehavior = 0;
 let selectedNodeId   = null;
 let latestTickState  = null;   // most recent /api/tickstate response
 const TICK_STATUS_COLORS = { SUCCESS: '#a6e3a1', FAILURE: '#f38ba8', RUNNING: '#fab387' };
-let isDirty    = false;
-let nextNodeId = 0;
+let isDirty       = false;
+let nextNodeId    = 0;
+let dragNodeId    = null;
+let dragOverId    = null;
+let nodePositions = {};
 
 function genId() { return nextNodeId++; }
 
@@ -544,7 +543,6 @@ function updateEditPanel(node) {
   onEditTypeChange();
   const root       = currentRoot();
   const parentInfo = root ? findParentOf(root, node.id) : null;
-  document.getElementById('edit-move-row').style.display = parentInfo ? 'flex' : 'none';
   const regSection = document.getElementById('edit-reg-section');
   if (isLeaf(node.type)) {
     const registered = nodeRegistered(node);
@@ -613,22 +611,6 @@ function addChildToSelected() {
   if (!node || !isComposite(node.type)) { return; }
   node.children = node.children || [];
   node.children.push({ id: genId(), type: 'action', name: 'new_action', children: [] });
-  markDirty();
-  renderBehaviorTree(selectedBehavior);
-}
-
-function moveSelectedNode(dir) {
-  if (selectedNodeId === null) { return; }
-  const root = currentRoot();
-  if (!root) { return; }
-  const result = findParentOf(root, selectedNodeId);
-  if (!result) { return; }
-  const { parent, index } = result;
-  const newIdx = index + dir;
-  if (newIdx < 0 || newIdx >= parent.children.length) { return; }
-  const tmp = parent.children[index];
-  parent.children[index]  = parent.children[newIdx];
-  parent.children[newIdx] = tmp;
   markDirty();
   renderBehaviorTree(selectedBehavior);
 }
@@ -712,23 +694,18 @@ function treeToYaml(data) {
   return yaml;
 }
 
-const NODE_W = 120, NODE_H = 40, V_GAP = 56, H_GAP = 16;
+const NODE_W = 130, NODE_H = 36, ROW_GAP = 14, DEPTH_IND = 34, ML = 28, MT = 20;
 
-function computeWidth(node) {
-  if (!node.children || node.children.length === 0) { node._w = NODE_W; return; }
-  node.children.forEach(computeWidth);
-  const childW = node.children.reduce((s, c) => s + c._w, 0) + H_GAP * (node.children.length - 1);
-  node._w = Math.max(NODE_W, childW);
-}
-
-function assignPos(node, posX, posY) {
-  node._x = posX; node._y = posY;
-  if (!node.children || node.children.length === 0) { return; }
-  const childW = node.children.reduce((s, c) => s + c._w, 0) + H_GAP * (node.children.length - 1);
-  let cx = posX - childW / 2;
-  for (const child of node.children) {
-    assignPos(child, cx + child._w / 2, posY + NODE_H + V_GAP);
-    cx += child._w + H_GAP;
+function assignPosV(node, depth, sibIdx, sibCount, yRef) {
+  node._depth    = depth;
+  node._sibIdx   = sibIdx;
+  node._sibCount = sibCount;
+  node._x = ML + depth * DEPTH_IND + NODE_W / 2;
+  node._y = yRef.y;
+  yRef.y += NODE_H + ROW_GAP;
+  const kids = node.children || [];
+  for (let i = 0; i < kids.length; i++) {
+    assignPosV(kids[i], depth + 1, i, kids.length, yRef);
   }
 }
 
@@ -746,33 +723,37 @@ function renderBehaviorTree(idx) {
       '<p style="padding:14px;font-size:11px;color:#585b70">No tree data</p>';
     return;
   }
-  computeWidth(root);
-  const svgW = root._w + 60;
-  assignPos(root, svgW / 2, 24);
+  const yRef = { y: MT };
+  assignPosV(root, 0, -1, 0, yRef);
   const all = [];
   function collect(n) { all.push(n); (n.children||[]).forEach(collect); }
   collect(root);
-  const svgH = Math.max(...all.map(n => n._y)) + NODE_H + 30;
+  nodePositions = {};
+  for (const node of all) { nodePositions[node.id] = { x: node._x, y: node._y }; }
+  const maxDepth = Math.max(...all.map(n => n._depth));
+  const svgW = ML * 2 + (maxDepth + 1) * DEPTH_IND + NODE_W;
+  const svgH = Math.max(...all.map(n => n._y)) + NODE_H + MT;
   let edges = '', nodes = '';
   for (const node of all) {
     for (const child of (node.children||[])) {
-      edges += `<line x1="${node._x}" y1="${node._y+NODE_H}" x2="${child._x}" y2="${child._y}" stroke="#45475a" stroke-width="1.5"/>`;
+      const px = node._x, py = node._y + NODE_H;
+      const cy = child._y + NODE_H / 2, cx = child._x - NODE_W / 2;
+      edges += `<path d="M ${px} ${py} V ${cy} H ${cx}" stroke="#313244" stroke-width="1.5" fill="none"/>`;
     }
   }
   const ISSUE_COLORS = { ERROR: '#f38ba8', WARNING: '#fab387' };
-  // Build active-path lookup from latest tick state for overlay.
   const activePathMap = {};
   if (latestTickState && latestTickState.activePath) {
     for (const ap of latestTickState.activePath) { activePathMap[ap.name] = ap.status; }
   }
   for (const node of all) {
-    const col     = node._edited ? '#f9e2af' : (NODE_COLORS[node.type] || '#cdd6f4');
-    const nx      = node._x - NODE_W / 2;
-    const nm      = (node.name||'').length > 14 ? (node.name||'').slice(0,13)+'…' : (node.name||'');
-    const sel     = node.id === selectedNodeId;
+    const col      = node._edited ? '#f9e2af' : (NODE_COLORS[node.type] || '#cdd6f4');
+    const nx       = node._x - NODE_W / 2;
+    const nm       = (node.name||'').length > 15 ? (node.name||'').slice(0,14)+'…' : (node.name||'');
+    const sel      = node.id === selectedNodeId;
     const issueSev = issueMap[node.path];
     const issueCol = issueSev ? ISSUE_COLORS[issueSev] : null;
-    const strW    = sel ? '2.5' : '1.5';
+    const strW     = sel ? '2.5' : '1.5';
     const activeStatus = activePathMap[node.name];
     const activeCol    = activeStatus ? TICK_STATUS_COLORS[activeStatus] : null;
     if (activeCol) {
@@ -786,14 +767,15 @@ function renderBehaviorTree(idx) {
     if (sel) {
       nodes += `<rect x="${nx-3}" y="${node._y-3}" width="${NODE_W+6}" height="${NODE_H+6}" rx="8" fill="none" stroke="${col}" stroke-width="1" opacity="0.4"/>`;
     }
-    nodes += `<rect x="${nx}" y="${node._y}" width="${NODE_W}" height="${NODE_H}" rx="6" fill="#181825" stroke="${col}" stroke-width="${strW}" style="cursor:pointer" onclick="selectNode(${node.id})"/>`;
-    nodes += `<text x="${node._x}" y="${node._y+14}" text-anchor="middle" fill="${col}" font-size="9" font-family="monospace" pointer-events="none">${(node.type||'').toUpperCase()}</text>`;
-    nodes += `<text x="${node._x}" y="${node._y+29}" text-anchor="middle" fill="#cdd6f4" font-size="11" font-family="monospace" pointer-events="none">${nm}</text>`;
+    nodes += `<rect x="${nx}" y="${node._y}" width="${NODE_W}" height="${NODE_H}" rx="6" fill="#181825" stroke="${col}" stroke-width="${strW}" style="cursor:grab" onclick="selectNode(${node.id})" onmousedown="onDragStart(${node.id})" onmouseenter="onDragEnter(${node.id})" onmouseleave="onDragLeave(${node.id})"/>`;
+    nodes += `<text x="${node._x}" y="${node._y+13}" text-anchor="middle" fill="${col}" font-size="9" font-family="monospace" pointer-events="none">${(node.type||'').toUpperCase()}</text>`;
+    nodes += `<text x="${node._x}" y="${node._y+27}" text-anchor="middle" fill="#cdd6f4" font-size="11" font-family="monospace" pointer-events="none">${nm}</text>`;
     if (isLeaf(node.type)) {
       const regCol = nodeRegistered(node) ? '#a6e3a1' : '#f38ba8';
-      const regX   = nx + 6;
-      const regY   = node._y + 6;
-      nodes += `<circle cx="${regX}" cy="${regY}" r="4" fill="${regCol}" opacity="0.9"/>`;
+      nodes += `<circle cx="${nx+6}" cy="${node._y+6}" r="4" fill="${regCol}" opacity="0.9"/>`;
+    }
+    if (node._sibCount > 1) {
+      nodes += `<text x="${nx-8}" y="${node._y+NODE_H/2+4}" text-anchor="middle" fill="#585b70" font-size="10" font-family="monospace" pointer-events="none">${node._sibIdx+1}</text>`;
     }
     if (issueCol) {
       nodes += `<circle cx="${nx+NODE_W-4}" cy="${node._y+4}" r="5" fill="${issueCol}"/>`;
@@ -803,6 +785,69 @@ function renderBehaviorTree(idx) {
   document.getElementById('svg-container').innerHTML =
     `<svg width="${svgW}" height="${svgH}">${edges}${nodes}</svg>`;
 }
+
+function onDragStart(nodeId) {
+  dragNodeId = nodeId;
+  dragOverId = null;
+  document.getElementById('svg-container').style.cursor = 'grabbing';
+}
+function onDragEnter(nodeId) {
+  if (dragNodeId === null || nodeId === dragNodeId) { return; }
+  const root = currentRoot();
+  if (!root) { return; }
+  const src = findParentOf(root, dragNodeId);
+  const dst = findParentOf(root, nodeId);
+  if (!src || !dst || src.parent !== dst.parent) { return; }
+  dragOverId = nodeId;
+  const old = document.getElementById('drag-highlight');
+  if (old) { old.remove(); }
+  const pos = nodePositions[nodeId];
+  const svg = document.querySelector('#svg-container svg');
+  if (!pos || !svg) { return; }
+  const hl = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  hl.setAttribute('id', 'drag-highlight');
+  hl.setAttribute('x',  pos.x - NODE_W/2 - 3);
+  hl.setAttribute('y',  pos.y - 3);
+  hl.setAttribute('width',  NODE_W + 6);
+  hl.setAttribute('height', NODE_H + 6);
+  hl.setAttribute('rx', '8');
+  hl.setAttribute('fill', 'none');
+  hl.setAttribute('stroke', '#89b4fa');
+  hl.setAttribute('stroke-width', '2');
+  hl.setAttribute('stroke-dasharray', '4,3');
+  hl.setAttribute('opacity', '0.85');
+  hl.setAttribute('pointer-events', 'none');
+  svg.appendChild(hl);
+}
+function onDragLeave(nodeId) {
+  if (dragOverId === nodeId) {
+    dragOverId = null;
+    const old = document.getElementById('drag-highlight');
+    if (old) { old.remove(); }
+  }
+}
+function onDragEnd() {
+  document.getElementById('svg-container').style.cursor = '';
+  const old = document.getElementById('drag-highlight');
+  if (old) { old.remove(); }
+  if (dragNodeId !== null && dragOverId !== null) {
+    const root = currentRoot();
+    if (root) {
+      const src = findParentOf(root, dragNodeId);
+      const dst = findParentOf(root, dragOverId);
+      if (src && dst && src.parent === dst.parent) {
+        const tmp = src.parent.children[src.index];
+        src.parent.children[src.index] = dst.parent.children[dst.index];
+        dst.parent.children[dst.index] = tmp;
+        markDirty();
+        renderBehaviorTree(selectedBehavior);
+      }
+    }
+  }
+  dragNodeId = null;
+  dragOverId = null;
+}
+document.addEventListener('mouseup', onDragEnd);
 
 async function pollTickState() {
   try {
