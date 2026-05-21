@@ -641,6 +641,75 @@ TEST(Phase1_Blackboard, OverwriteWithSet) {
     EXPECT_EQ(board.get<std::string>("name"), "attack");
 }
 
+// ── Type safety (Gap 8) ────────────────────────────────────────────────────────
+
+TEST(Phase1_Blackboard, TypeSafety_RegisterSourceConflictThrows) {
+    bt::Blackboard board;
+    board.registerSource<bool>("enemy_near", [] { return false; });
+    EXPECT_THROW(
+        board.registerSource<int>("enemy_near", [] { return 0; }),
+        std::runtime_error
+    );
+}
+
+TEST(Phase1_Blackboard, TypeSafety_SetConflictThrows) {
+    bt::Blackboard board;
+    board.set<int>("health", 100);
+    EXPECT_THROW(board.set<bool>("health", true), std::runtime_error);
+}
+
+TEST(Phase1_Blackboard, TypeSafety_CrossMethodConflictThrows) {
+    bt::Blackboard board;
+    board.set<bool>("flag", false);
+    EXPECT_THROW(
+        board.registerSource<int>("flag", [] { return 1; }),
+        std::runtime_error
+    );
+}
+
+TEST(Phase1_Blackboard, TypeSafety_GetWithWrongTypeThrows) {
+    bt::Blackboard board;
+    board.registerSource<bool>("enemy_near", [] { return true; });
+    EXPECT_THROW(board.get<int>("enemy_near"), std::runtime_error);
+}
+
+TEST(Phase1_Blackboard, TypeSafety_GetMismatchMessageContainsKeyName) {
+    bt::Blackboard board;
+    board.registerSource<bool>("enemy_near", [] { return true; });
+    try {
+        board.get<int>("enemy_near");
+        FAIL() << "expected std::runtime_error";
+    } catch (const std::runtime_error& exc) {
+        EXPECT_NE(std::string(exc.what()).find("enemy_near"), std::string::npos);
+    }
+}
+
+TEST(Phase1_Blackboard, TypeSafety_SameTypeSetAllowed) {
+    bt::Blackboard board;
+    board.set<int>("health", 100);
+    EXPECT_NO_THROW(board.set<int>("health", 90));
+    EXPECT_EQ(board.get<int>("health"), 90);
+}
+
+TEST(Phase1_Blackboard, TypeSafety_SameTypeSourceAllowed) {
+    bt::Blackboard board;
+    int v = 1;
+    board.registerSource<int>("sensor", [&v] { return v; });
+    EXPECT_NO_THROW(board.registerSource<int>("sensor", [&v] { return v * 2; }));
+    EXPECT_EQ(board.get<int>("sensor"), 2);
+}
+
+TEST(Phase1_Blackboard, TypeSafety_ConflictMessageContainsKeyName) {
+    bt::Blackboard board;
+    board.set<int>("ammo", 30);
+    try {
+        board.set<float>("ammo", 1.5f);
+        FAIL() << "expected std::runtime_error";
+    } catch (const std::runtime_error& exc) {
+        EXPECT_NE(std::string(exc.what()).find("ammo"), std::string::npos);
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // BehaviorTree
 // ═══════════════════════════════════════════════════════════════════════════════

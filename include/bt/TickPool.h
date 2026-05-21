@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstddef>
+#include <exception>
 #include <memory>
+#include <vector>
 
 #include "bt/BehaviorTree.h"
 
@@ -41,6 +43,14 @@ public:
 
     [[nodiscard]] std::size_t size() const noexcept;
     [[nodiscard]] std::size_t threadCount() const noexcept;
+
+    // Per-agent errors captured during the last tickAll() round.
+    // Cleared at the start of every tickAll() — copy if you need to retain them.
+    struct AgentError {
+        BehaviorTree*      tree{nullptr};
+        std::exception_ptr error;
+    };
+    [[nodiscard]] const std::vector<AgentError>& lastErrors() const noexcept;
 
 private:
     struct Impl;

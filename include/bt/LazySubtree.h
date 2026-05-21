@@ -26,6 +26,10 @@ public:
 
     [[nodiscard]] bool materialized() const noexcept { return !children_.empty(); }
 
+    // Non-empty if the factory threw on its first invocation.
+    // The subtree will return FAILURE on every subsequent tick without retrying.
+    [[nodiscard]] const std::string& factoryError() const noexcept { return factoryError_; }
+
     [[nodiscard]] std::string_view typeName() const noexcept override { return "LazySubtree"; }
     [[nodiscard]] std::span<const std::unique_ptr<Node>> children() const noexcept override;
     void reset() override;
@@ -36,6 +40,7 @@ protected:
 private:
     std::function<std::unique_ptr<Node>()> factory_;
     std::vector<std::unique_ptr<Node>>     children_;
+    std::string                            factoryError_;
 };
 
 }  // namespace bt

@@ -22,6 +22,8 @@
 // includable from C as well as C++.  Suppress the C++ style checks here.
 // NOLINTBEGIN(readability-identifier-naming,modernize-use-using,performance-enum-size,readability-identifier-length)
 
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -50,6 +52,13 @@ typedef double (*bt_double_source_fn_t)(void* ctx);
 // Blackboard source returning a bool value (non-zero = true).
 typedef int (*bt_bool_source_fn_t)(void* ctx);
 
+// Blackboard source returning a 32-bit signed integer.
+typedef int32_t (*bt_int32_source_fn_t)(void* ctx);
+
+// Blackboard source returning a C string. The pointer must remain valid until
+// the next tick (i.e. point to a static buffer or a value owned by the caller).
+typedef const char* (*bt_string_source_fn_t)(void* ctx);
+
 // ── Registry ──────────────────────────────────────────────────────────────────
 
 // Create a new registry.  Must be destroyed with bt_registry_destroy().
@@ -77,6 +86,15 @@ void bt_registry_add_double_source(bt_handle_t reg, const char* key,
 void bt_registry_add_bool_source(bt_handle_t reg, const char* key,
                                   bt_bool_source_fn_t func, void* ctx);
 
+// Register a 32-bit signed integer blackboard source.
+void bt_registry_add_int32_source(bt_handle_t reg, const char* key,
+                                   bt_int32_source_fn_t func, void* ctx);
+
+// Register a string blackboard source.  The returned pointer must remain valid
+// until the next call to bt_tree_tick() on this tree.
+void bt_registry_add_string_source(bt_handle_t reg, const char* key,
+                                    bt_string_source_fn_t func, void* ctx);
+
 // ── Tree ──────────────────────────────────────────────────────────────────────
 
 // Parse yaml and build a BehaviorTree using the registered implementations.
@@ -94,8 +112,11 @@ BtCStatus bt_tree_tick(bt_handle_t tree);
 // Values reflect the state captured during the last bt_tree_tick() call.
 // Returns 0 / 0.0 if the key does not exist or tree is nullptr.
 
-double bt_tree_get_double(bt_handle_t tree, const char* key);
-int    bt_tree_get_bool(bt_handle_t tree, const char* key);
+double      bt_tree_get_double(bt_handle_t tree, const char* key);
+int         bt_tree_get_bool  (bt_handle_t tree, const char* key);
+int32_t     bt_tree_get_int32 (bt_handle_t tree, const char* key);
+// Returns a pointer to an internal thread-local buffer. Copy if persistence is needed.
+const char* bt_tree_get_string(bt_handle_t tree, const char* key);
 
 // ── Monitor server ────────────────────────────────────────────────────────────
 // Optional live tree viewer — attach once after bt_tree_load(), then keep

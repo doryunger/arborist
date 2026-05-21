@@ -317,3 +317,56 @@ TEST(Phase5_MonitorServer, HistoryEndpointEmptyWhenNoTicks) {
 
     server.stop();
 }
+
+// ── DecisionEmitter ring-buffer correctness ───────────────────────────────────
+
+TEST(Phase5_DecisionEmitter, UnboundedGrowsWithoutLimit) {
+    bt::DecisionEmitter emitter;  // capacity 0 = unbounded
+    for (int idx = 0; idx < 50; ++idx) {
+        emitter.record(static_cast<std::size_t>(idx), "beh", bt::Status::SUCCESS, emptyBoard(), {});
+    }
+    EXPECT_EQ(emitter.history().size(), 50u);
+}
+
+TEST(Phase5_DecisionEmitter, BoundedEvictsOldestWhenFull) {
+    constexpr std::size_t kCap = 5;
+    bt::DecisionEmitter emitter{kCap};
+    for (int idx = 1; idx <= 8; ++idx) {
+        emitter.record(static_cast<std::size_t>(idx), "beh" + std::to_string(idx),
+                       bt::Status::SUCCESS, emptyBoard(), {});
+    }
+    // Only the 5 most recent records should remain
+    ASSERT_EQ(emitter.history().size(), kCap);
+    EXPECT_EQ(emitter.history().front().tickNumber, 4u);  // tick 1-3 evicted
+    EXPECT_EQ(emitter.history().back().tickNumber,  8u);
+}
+
+TEST(Phase5_DecisionEmitter, BoundedNeverExceedsCapacity) {
+    constexpr std::size_t kCap = 3;
+    bt::DecisionEmitter emitter{kCap};
+    for (int idx = 0; idx < 100; ++idx) {
+        emitter.record(static_cast<std::size_t>(idx), "beh", bt::Status::SUCCESS, emptyBoard(), {});
+        EXPECT_LE(emitter.history().size(), kCap);
+    }
+}
+
+TEST(Phase5_DecisionEmitter, ClearEmptiesHistory) {
+    bt::DecisionEmitter emitter{10};
+    emitter.record(1, "beh", bt::Status::SUCCESS, emptyBoard(), {});
+    emitter.record(2, "beh", bt::Status::SUCCESS, emptyBoard(), {});
+    emitter.clear();
+    EXPECT_TRUE(emitter.history().empty());
+}
+
+TEST(Phase5_DecisionEmitter, OrderIsPreservedOldestFirst) {
+    constexpr std::size_t kCap = 4;
+    bt::DecisionEmitter emitter{kCap};
+    for (int idx = 1; idx <= 6; ++idx) {
+        emitter.record(static_cast<std::size_t>(idx), "beh", bt::Status::SUCCESS, emptyBoard(), {});
+    }
+    // After inserting 6 into a cap-4 buffer: ticks 3,4,5,6 remain in order
+    ASSERT_EQ(emitter.history().size(), 4u);
+    for (std::size_t pos = 0; pos < emitter.history().size(); ++pos) {
+        EXPECT_EQ(emitter.history()[pos].tickNumber, pos + 3u);
+    }
+}

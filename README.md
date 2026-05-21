@@ -74,6 +74,8 @@ This design eliminates an entire class of bugs common in hand-crafted AI: the co
 
 The Blackboard also feeds the decision history. Every tick record optionally includes a full snapshot of the blackboard at the time of decision, so replaying or reviewing AI behavior includes the exact state that drove each choice. Snapshot capture is opt-in; in production builds it is disabled to avoid the memory cost described in the performance section below.
 
+The Blackboard enforces type safety at registration time. Once a key is written via `set<T>()` or `registerSource<T>()`, the type is recorded. Any later call for that key with a different type throws `std::runtime_error` immediately, with the key name in the message. `get<T>()` performs the same check before casting, replacing the opaque `std::bad_any_cast` with a clear, actionable diagnostic.
+
 ---
 
 ## Live Monitoring
@@ -98,7 +100,11 @@ A standalone browser-based editor runs on a separate HTTP server (default port 8
 
 **Save to file.** The editor serializes the in-memory tree back to YAML and writes it to the schema file on disk via `POST /api/schema`. The serializer reconstructs valid, properly-indented YAML from the graph state — the round-trip is lossless for all node types the framework supports.
 
-**REST API.** All editor data is also accessible as JSON endpoints for external tooling:
+**Hot-reload.** When `EditorServer::attachTree(tree, registry)` is called, every successful schema save automatically rebuilds and hot-swaps the running tree via `BehaviorTree::reload()`. If the new schema references an action not in the registry, the file is saved but the live tree is left unchanged — no crash, no interruption.
+
+**Live tick overlay.** When `EditorServer::attachEmitter(emitter)` is called, the editor graph overlays which nodes ran on the most recent tick: green border for SUCCESS, orange for RUNNING, red for FAILURE. The overlay updates at 500 ms intervals via `GET /api/tickstate`. The re-render is skipped while the user is actively editing to avoid disrupting interaction.
+
+**REST API.** All editor data is accessible as JSON endpoints for external tooling:
 
 | Endpoint | Purpose |
 |---|---|
@@ -106,11 +112,16 @@ A standalone browser-based editor runs on a separate HTTP server (default port 8
 | `GET /api/conditions` | All declared conditions |
 | `GET /api/blackboard` | All declared blackboard keys |
 | `GET /api/schema` | Current schema YAML |
-| `POST /api/schema` | Save updated schema YAML |
+| `POST /api/schema` | Save updated schema YAML; hot-reloads attached tree |
 | `GET /api/tree` | Full tree as structured JSON (node types, IDs, paths, intent) |
 | `GET /api/analyze` | Complexity analysis — issues and metrics |
+| `GET /api/tickstate` | Latest tick record — tick number, behavior, active node path |
 | `PUT /api/actions/:name` | Upsert an action contract |
 | `DELETE /api/actions/:name` | Remove an action contract |
+| `PUT /api/conditions/:name` | Upsert a condition contract |
+| `DELETE /api/conditions/:name` | Remove a condition contract |
+| `PUT /api/blackboard/:key` | Upsert a blackboard key declaration |
+| `DELETE /api/blackboard/:key` | Remove a blackboard key declaration |
 
 ---
 
@@ -192,12 +203,17 @@ The framework includes a large-scale benchmark that synthesizes agent population
 - Decision history — which behavior ran, which nodes were evaluated, full blackboard snapshot — is recorded for every tick
 - Ring-buffer history with configurable capacity prevents unbounded memory growth
 - Blackboard snapshot capture is opt-in; disabled in production to eliminate allocation overhead
+- Blackboard type safety — key type is fixed at first registration; mismatches throw descriptive errors immediately
 - Lazy subtree instantiation defers building node trees until first use
 - Every behavior can be regression-tested without an engine
 - Logic errors surface at load time, not during gameplay
 - Large trees are automatically partitioned into manageable scopes
 - Live browser viewer shows exactly which nodes ran and with what result
 - Browser-based visual editor for authoring trees and contracts without touching source files
+- Visual editor hot-reloads the running tree on every schema save
+- Live tick overlay in the visual editor highlights active nodes on each tick
+- TickPool per-agent exception isolation — one bad tree cannot crash or stall the pool
+- C API supports bool, float, int32, and string blackboard types for Unity/Unreal/Godot integration
 
 ---
 

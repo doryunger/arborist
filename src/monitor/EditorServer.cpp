@@ -33,30 +33,24 @@ static constexpr std::string_view kEditorHtml = R"html(<!DOCTYPE html>
   #header h1 { margin: 0; font-size: 15px; color: #89b4fa; letter-spacing: 0.05em; }
   .badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #a6e3a1; color: #1e1e2e; font-weight: bold; }
   .badge.disconnected { background: #f38ba8; }
+  .badge.pending { background: #f9e2af; color: #1e1e2e; }
   #main { display: flex; flex: 1; overflow: hidden; }
   .panel { padding: 14px; overflow-y: auto; }
-  #contracts { width: 320px; border-right: 1px solid #313244; display: flex; flex-direction: column; gap: 10px; }
-  .contract-hdr { display: flex; align-items: center; margin-bottom: 6px; }
-  .contract-hdr h2 { flex: 1; margin: 0; }
-  .contract-hdr button { padding: 2px 7px; font-size: 10px; }
-  .contract-form { background: #11111b; border: 1px solid #313244; border-radius: 4px; padding: 8px; display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
-  .contract-form label { font-size: 10px; color: #6c7086; }
-  .contract-form input { width: 100%; background: #1e1e2e; border: 1px solid #45475a; border-radius: 3px; color: #cdd6f4; font-family: monospace; font-size: 11px; padding: 3px 6px; }
-  .contract-form input:focus { outline: none; border-color: #89b4fa; }
-  .form-btns { display: flex; gap: 5px; margin-top: 2px; }
-  .item-row { display: flex; gap: 3px; align-items: flex-start; }
-  .item-body { flex: 1; min-width: 0; }
-  .item-btns { display: flex; gap: 2px; flex-shrink: 0; }
+  #pending-panel { width: 260px; border-right: 1px solid #313244; display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; }
+  .pending-hdr { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .pending-hdr h2 { flex: 1; margin: 0; }
+  .change-card { background: #181825; border: 1px solid #45475a; border-left: 3px solid #f9e2af; border-radius: 5px; padding: 7px 9px; font-size: 11px; cursor: pointer; transition: border-color 0.15s; }
+  .change-card:hover { border-color: #f9e2af; background: #1e1e2e; }
+  .change-beh { font-size: 10px; color: #6c7086; margin-bottom: 2px; }
+  .change-name { color: #f9e2af; font-weight: bold; margin-bottom: 4px; }
+  .change-row { display: flex; align-items: center; gap: 4px; font-size: 10px; margin-bottom: 2px; }
+  .change-label { color: #6c7086; min-width: 36px; }
+  .change-old { color: #f38ba8; text-decoration: line-through; }
+  .change-arrow { color: #585b70; }
+  .change-new { color: #a6e3a1; }
+  .change-revert { font-size: 9px; padding: 1px 6px; margin-top: 5px; }
   #schema-panel { flex: 1; display: flex; flex-direction: column; gap: 10px; overflow: hidden; padding: 14px; }
   h2 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #89b4fa; }
-  .item { margin-bottom: 5px; padding: 6px 9px; border-radius: 5px; background: #181825; border: 1px solid #313244; font-size: 11px; }
-  .item .name { color: #cba6f7; font-weight: bold; }
-  .item .intent { color: #a6adc8; margin-top: 2px; }
-  .item .deps { margin-top: 3px; }
-  .tag { display: inline-block; padding: 1px 5px; border-radius: 3px; font-size: 10px; margin: 1px; }
-  .tag.read  { background: #1e3a5f; color: #89b4fa; }
-  .tag.write { background: #3a1e1e; color: #f38ba8; }
-  .tag.key   { background: #1e3a2e; color: #a6e3a1; }
   #schema-view { display: flex; flex-direction: column; flex: 1; overflow: hidden; gap: 10px; }
   #schema-yaml { flex: 1; background: #181825; border: 1px solid #313244; border-radius: 5px; padding: 10px; font-size: 11px; white-space: pre; overflow: auto; color: #a6e3a1; min-height: 0; }
   #analyze-section { border-top: 1px solid #313244; padding-top: 10px; }
@@ -73,13 +67,25 @@ static constexpr std::string_view kEditorHtml = R"html(<!DOCTYPE html>
   .view-btn.active { background: #1e3a5f; color: #89b4fa; border-color: #89b4fa; }
   .btn-danger { color: #f38ba8; border-color: #f38ba8; }
   .btn-danger:hover { background: #3a1e1e; }
+  .btn-validate { color: #f9e2af; border-color: #f9e2af; }
+  .btn-validate:hover { background: #2e2a1e; }
   .toolbar { display: flex; gap: 6px; align-items: center; }
   .path-label { font-size: 10px; color: #585b70; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   #graph-view { display: flex; flex-direction: column; flex: 1; overflow: hidden; gap: 6px; }
   .graph-toolbar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
-  #behavior-tabs { flex: 1; display: flex; gap: 5px; flex-wrap: wrap; }
-  .beh-pill { padding: 3px 9px; border-radius: 12px; font-size: 11px; cursor: pointer; background: #313244; border: 1px solid #45475a; color: #cdd6f4; }
-  .beh-pill.active { background: #1e3a5f; border-color: #89b4fa; color: #89b4fa; }
+  .beh-dropdown { position: relative; }
+  #beh-trigger { display: flex; align-items: center; gap: 8px; min-width: 200px; max-width: 320px; }
+  #beh-trigger-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+  .beh-arrow { flex-shrink: 0; font-size: 9px; color: #6c7086; }
+  #beh-menu { position: absolute; top: calc(100% + 4px); left: 0; min-width: 280px; background: #181825; border: 1px solid #45475a; border-radius: 5px; z-index: 100; box-shadow: 0 6px 20px rgba(0,0,0,0.5); }
+  #beh-search { width: 100%; background: #11111b; border: none; border-bottom: 1px solid #313244; color: #cdd6f4; font-family: monospace; font-size: 11px; padding: 7px 10px; outline: none; border-radius: 5px 5px 0 0; }
+  #beh-search::placeholder { color: #585b70; }
+  #beh-items { max-height: 240px; overflow-y: auto; }
+  .beh-item { padding: 6px 10px; font-size: 11px; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+  .beh-item:hover { background: #313244; }
+  .beh-item.active { background: #1e3a5f; color: #89b4fa; }
+  .beh-item-name { flex: 1; }
+  .beh-item-cond { font-size: 10px; color: #6c7086; }
   .graph-body { display: flex; gap: 8px; flex: 1; min-height: 0; }
   #svg-container { flex: 1; overflow: auto; background: #181825; border: 1px solid #313244; border-radius: 5px; padding: 10px; min-height: 0; }
   #edit-panel { width: 196px; background: #181825; border: 1px solid #313244; border-radius: 5px; padding: 10px; display: flex; flex-direction: column; gap: 6px; overflow-y: auto; flex-shrink: 0; }
@@ -89,6 +95,10 @@ static constexpr std::string_view kEditorHtml = R"html(<!DOCTYPE html>
   .edit-row { display: flex; gap: 5px; }
   .edit-row button { flex: 1; padding: 4px 6px; font-size: 10px; }
   #edit-empty { font-size: 11px; color: #585b70; padding: 6px 0; }
+  #edit-reg-section { font-size: 10px; padding: 2px 0; }
+  #edit-prev-section { border-top: 1px solid #313244; margin-top: 6px; padding-top: 6px; }
+  #edit-prev-section h2 { color: #f9e2af; }
+  .prev-val { font-size: 11px; color: #a6adc8; padding: 1px 0; }
   #status-bar { padding: 3px 18px; background: #11111b; font-size: 10px; color: #585b70; border-top: 1px solid #313244; }
 </style>
 </head>
@@ -99,52 +109,19 @@ static constexpr std::string_view kEditorHtml = R"html(<!DOCTYPE html>
   <span id="schema-path" style="font-size:11px;color:#585b70;"></span>
 </div>
 <div id="main">
-  <div class="panel" id="contracts">
-    <div>
-      <div class="contract-hdr"><h2>Actions</h2><button onclick="showCForm('action',null)">+</button></div>
-      <div id="actions-list"><em style="color:#585b70;font-size:11px">loading...</em></div>
-      <div id="action-form" class="contract-form" style="display:none">
-        <label>Name</label><input id="af-name" placeholder="action_name">
-        <label>Intent</label><input id="af-intent" placeholder="description">
-        <label>Reads (comma-separated)</label><input id="af-reads" placeholder="key1, key2">
-        <label>Writes (comma-separated)</label><input id="af-writes" placeholder="key1, key2">
-        <div class="form-btns">
-          <button onclick="saveCForm('action')">Save</button>
-          <button onclick="hideCForm('action')">Cancel</button>
-        </div>
-      </div>
+  <div class="panel" id="pending-panel">
+    <div class="pending-hdr">
+      <h2>Pending Changes</h2>
+      <span class="badge pending" id="pending-count-badge" style="display:none">0</span>
     </div>
-    <div>
-      <div class="contract-hdr"><h2>Conditions</h2><button onclick="showCForm('condition',null)">+</button></div>
-      <div id="conditions-list"><em style="color:#585b70;font-size:11px">loading...</em></div>
-      <div id="condition-form" class="contract-form" style="display:none">
-        <label>Name</label><input id="cf-name" placeholder="condition_name">
-        <label>Intent</label><input id="cf-intent" placeholder="description">
-        <label>Reads (comma-separated)</label><input id="cf-reads" placeholder="key1, key2">
-        <div class="form-btns">
-          <button onclick="saveCForm('condition')">Save</button>
-          <button onclick="hideCForm('condition')">Cancel</button>
-        </div>
-      </div>
-    </div>
-    <div>
-      <div class="contract-hdr"><h2>Blackboard Keys</h2><button onclick="showCForm('key',null)">+</button></div>
-      <div id="blackboard-list"><em style="color:#585b70;font-size:11px">loading...</em></div>
-      <div id="key-form" class="contract-form" style="display:none">
-        <label>Key</label><input id="kf-name" placeholder="key_name">
-        <label>Type</label><input id="kf-type" placeholder="vec3, int, bool...">
-        <div class="form-btns">
-          <button onclick="saveCForm('key')">Save</button>
-          <button onclick="hideCForm('key')">Cancel</button>
-        </div>
-      </div>
-    </div>
+    <div id="pending-list"><em style="color:#585b70;font-size:11px">No pending changes</em></div>
   </div>
   <div id="schema-panel">
     <div class="toolbar">
       <h2 style="margin:0">Schema</h2>
       <button onclick="loadSchema()">&#x21BA; Reload</button>
       <button onclick="runAnalysis()">&#x26A1; Analyze</button>
+      <button id="validate-btn" class="btn-validate" onclick="validateChanges()" style="display:none">&#x2714; Validate</button>
       <button class="view-btn active" id="btn-schema" onclick="showView('schema')">YAML</button>
       <button class="view-btn" id="btn-graph" onclick="showView('graph')">Graph</button>
       <span class="path-label" id="file-path-label"></span>
@@ -159,7 +136,16 @@ static constexpr std::string_view kEditorHtml = R"html(<!DOCTYPE html>
     </div>
     <div id="graph-view" style="display:none">
       <div class="graph-toolbar">
-        <div id="behavior-tabs"></div>
+        <div class="beh-dropdown" id="beh-dropdown">
+          <button id="beh-trigger" onclick="toggleBehDropdown()">
+            <span id="beh-trigger-label">select behavior</span>
+            <span class="beh-arrow">&#x25BE;</span>
+          </button>
+          <div id="beh-menu" style="display:none">
+            <input id="beh-search" type="text" placeholder="Search behaviors..." oninput="filterBehItems()">
+            <div id="beh-items"></div>
+          </div>
+        </div>
         <button onclick="addBehavior()">+ Behavior</button>
         <button id="save-btn" onclick="saveTree()">Save Schema</button>
       </div>
@@ -198,6 +184,13 @@ static constexpr std::string_view kEditorHtml = R"html(<!DOCTYPE html>
               <button onclick="moveSelectedNode(-1)">&#x2190; Left</button>
               <button onclick="moveSelectedNode(1)">Right &#x2192;</button>
             </div>
+            <div id="edit-reg-section" style="display:none"></div>
+            <div id="edit-prev-section" style="display:none">
+              <h2>Previous Values</h2>
+              <label>Type</label><div class="prev-val" id="edit-prev-type"></div>
+              <label>Name</label><div class="prev-val" id="edit-prev-name"></div>
+              <label>Policy</label><div class="prev-val" id="edit-prev-policy"></div>
+            </div>
           </div>
         </div>
       </div>
@@ -210,82 +203,120 @@ const setStatus = s => { document.getElementById('status-bar').textContent = s; 
 
 let treeData   = null;
 let issueMap   = {};   // path -> 'ERROR' | 'WARNING'
+let registeredActions    = new Set();
+let registeredConditions = new Set();
 let selectedBehavior = 0;
 let selectedNodeId   = null;
+let latestTickState  = null;   // most recent /api/tickstate response
+const TICK_STATUS_COLORS = { SUCCESS: '#a6e3a1', FAILURE: '#f38ba8', RUNNING: '#fab387' };
 let isDirty    = false;
 let nextNodeId = 0;
-let contractsCache = { actions: [], conditions: [], keys: [] };
 
 function genId() { return nextNodeId++; }
 
-function showCForm(type, item) {
-  ['action','condition','key'].forEach(t => {
-    document.getElementById(t + '-form').style.display = 'none';
-  });
-  document.getElementById(type + '-form').style.display = 'flex';
-  document.getElementById(type + '-form').style.flexDirection = 'column';
-  if (type === 'action') {
-    document.getElementById('af-name').value   = item ? item.name   : '';
-    document.getElementById('af-intent').value = item ? item.intent : '';
-    document.getElementById('af-reads').value  = item ? (item.reads||[]).join(', ')  : '';
-    document.getElementById('af-writes').value = item ? (item.writes||[]).join(', ') : '';
-  } else if (type === 'condition') {
-    document.getElementById('cf-name').value   = item ? item.name   : '';
-    document.getElementById('cf-intent').value = item ? item.intent : '';
-    document.getElementById('cf-reads').value  = item ? (item.reads||[]).join(', ')  : '';
-  } else {
-    document.getElementById('kf-name').value = item ? item.key  : '';
-    document.getElementById('kf-type').value = item ? item.type : '';
+function isLeaf(type) { return type === 'action' || type === 'condition'; }
+
+function nodeRegistered(node) {
+  if (node.type === 'action')    { return registeredActions.has(node.name); }
+  if (node.type === 'condition') { return registeredConditions.has(node.name); }
+  return true;  // composites are always considered registered
+}
+
+function collectPendingChanges() {
+  if (!treeData) { return []; }
+  const changes = [];
+  for (let behIdx = 0; behIdx < (treeData.behaviors || []).length; behIdx++) {
+    const beh = treeData.behaviors[behIdx];
+    if (!beh.root) { continue; }
+    (function walk(node) {
+      if (node._edited) { changes.push({ behName: beh.name, behIdx, node }); }
+      (node.children || []).forEach(walk);
+    }(beh.root));
+  }
+  return changes;
+}
+
+function updatePendingPanel() {
+  const changes = collectPendingChanges();
+  const badge       = document.getElementById('pending-count-badge');
+  const list        = document.getElementById('pending-list');
+  const validateBtn = document.getElementById('validate-btn');
+  badge.textContent    = String(changes.length);
+  badge.style.display  = changes.length > 0 ? 'inline-block' : 'none';
+  validateBtn.style.display = changes.length > 0 ? 'inline-block' : 'none';
+  if (changes.length === 0) {
+    list.innerHTML = '<em style="color:#585b70;font-size:11px">No pending changes</em>';
+    return;
+  }
+  list.innerHTML = changes.map(({ behName, node }) => {
+    const prev = node._prev || {};
+    const typeChanged   = prev.type   !== node.type;
+    const nameChanged   = prev.name   !== node.name;
+    const policyChanged = node.type === 'parallel' && prev.policy !== node.policy;
+    const rows = [
+      typeChanged   ? `<div class="change-row"><span class="change-label">type</span><span class="change-old">${prev.type||''}</span><span class="change-arrow">&#x2192;</span><span class="change-new">${node.type}</span></div>` : '',
+      nameChanged   ? `<div class="change-row"><span class="change-label">name</span><span class="change-old">${prev.name||''}</span><span class="change-arrow">&#x2192;</span><span class="change-new">${node.name}</span></div>` : '',
+      policyChanged ? `<div class="change-row"><span class="change-label">policy</span><span class="change-old">${prev.policy||''}</span><span class="change-arrow">&#x2192;</span><span class="change-new">${node.policy}</span></div>` : '',
+    ].join('');
+    return `<div class="change-card" onclick="jumpToChange(${node.id})">` +
+      `<div class="change-beh">${behName}</div>` +
+      `<div class="change-name">${node.name || '(unnamed)'}</div>` +
+      rows +
+      `<button class="btn-danger change-revert" onclick="event.stopPropagation();revertNode(${node.id})">&#x21BA; Revert</button>` +
+      `</div>`;
+  }).join('');
+}
+
+function jumpToChange(nodeId) {
+  if (!treeData) { return; }
+  for (let idx = 0; idx < (treeData.behaviors || []).length; idx++) {
+    const beh = treeData.behaviors[idx];
+    if (beh.root && findNodeById(beh.root, nodeId)) {
+      selectedBehavior = idx;
+      selectedNodeId   = nodeId;
+      showView('graph');
+      renderBehaviorTabs();
+      renderBehaviorTree(idx);
+      updateEditPanel(findNodeById(beh.root, nodeId));
+      return;
+    }
   }
 }
 
-function hideCForm(type) {
-  document.getElementById(type + '-form').style.display = 'none';
-}
-
-function splitTags(str) {
-  return str.split(',').map(s => s.trim()).filter(Boolean);
-}
-
-async function saveCForm(type) {
-  const pathMap = { action: '/api/actions', condition: '/api/conditions', key: '/api/blackboard' };
-  let body;
-  if (type === 'action') {
-    const name = document.getElementById('af-name').value.trim();
-    if (!name) { setStatus('Name is required'); return; }
-    body = { name, intent: document.getElementById('af-intent').value.trim(),
-             reads: splitTags(document.getElementById('af-reads').value),
-             writes: splitTags(document.getElementById('af-writes').value) };
-  } else if (type === 'condition') {
-    const name = document.getElementById('cf-name').value.trim();
-    if (!name) { setStatus('Name is required'); return; }
-    body = { name, intent: document.getElementById('cf-intent').value.trim(),
-             reads: splitTags(document.getElementById('cf-reads').value) };
-  } else {
-    const key = document.getElementById('kf-name').value.trim();
-    if (!key) { setStatus('Key is required'); return; }
-    body = { key, type: document.getElementById('kf-type').value.trim() };
+function revertNode(nodeId) {
+  if (!treeData) { return; }
+  for (const beh of (treeData.behaviors || [])) {
+    if (!beh.root) { continue; }
+    const node = findNodeById(beh.root, nodeId);
+    if (node && node._edited) {
+      const prev  = node._prev;
+      node.type   = prev.type;
+      node.name   = prev.name;
+      node.policy = prev.policy;
+      node.children = prev.children;
+      delete node._edited;
+      delete node._prev;
+      updatePendingPanel();
+      renderBehaviorTabs();
+      renderBehaviorTree(selectedBehavior);
+      if (selectedNodeId === nodeId) { updateEditPanel(findNodeById(currentRoot(), nodeId)); }
+      return;
+    }
   }
-  try {
-    const res  = await fetch(pathMap[type], { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-    const data = await res.json();
-    if (data.error) { setStatus('Save failed: ' + data.error); return; }
-    hideCForm(type);
-    setStatus('Saved');
-    loadContracts();
-  } catch (e) { setStatus('Save failed: ' + e.message); }
 }
 
-async function deleteContract(type, name) {
-  const pathMap = { action: '/api/actions/', condition: '/api/conditions/', key: '/api/blackboard/' };
-  if (!window.confirm('Delete ' + type + " '" + name + "'?")) { return; }
-  try {
-    const res  = await fetch(pathMap[type] + encodeURIComponent(name), { method: 'DELETE' });
-    const data = await res.json();
-    if (data.error) { setStatus('Delete failed: ' + data.error); return; }
-    setStatus("Deleted '" + name + "'");
-    loadContracts();
-  } catch (e) { setStatus('Delete failed: ' + e.message); }
+async function validateChanges() {
+  if (!treeData) { return; }
+  function clearEdited(node) {
+    delete node._edited;
+    delete node._prev;
+    (node.children || []).forEach(clearEdited);
+  }
+  (treeData.behaviors || []).forEach(beh => { if (beh.root) { clearEdited(beh.root); } });
+  await saveTree();
+  updatePendingPanel();
+  renderBehaviorTree(selectedBehavior);
+  if (selectedNodeId !== null) { updateEditPanel(findNodeById(currentRoot(), selectedNodeId)); }
 }
 
 function isComposite(type) {
@@ -324,75 +355,12 @@ function showView(view) {
   if (!isSchema && !treeData) { loadTree(); }
 }
 
-function editBtn(type, idx) {
-  return `<button onclick="showCForm('${type}',contractsCache.${type === 'key' ? 'keys' : type + 's'}[${idx}])" style="padding:1px 5px;font-size:9px" title="Edit">&#x270E;</button>`;
-}
-function delBtn(type, name) {
-  return `<button onclick="deleteContract('${type}','${name}')" class="btn-danger" style="padding:1px 5px;font-size:9px" title="Delete">&#x2715;</button>`;
-}
-
-async function loadContracts() {
-  try {
-    const [actRes, condRes, bbRes] = await Promise.all([
-      fetch('/api/actions'), fetch('/api/conditions'), fetch('/api/blackboard')
-    ]);
-    const actions    = await actRes.json();
-    const conditions = await condRes.json();
-    const blackboard = await bbRes.json();
-    contractsCache.actions    = actions;
-    contractsCache.conditions = conditions;
-    contractsCache.keys       = blackboard;
-    document.getElementById('conn-badge').textContent = 'connected';
-    document.getElementById('conn-badge').classList.remove('disconnected');
-    document.getElementById('actions-list').innerHTML = actions.map((a, idx) => `
-      <div class="item">
-        <div class="item-row">
-          <div class="item-body">
-            <div class="name">${a.name}</div>
-            ${a.intent ? `<div class="intent">${a.intent}</div>` : ''}
-            <div class="deps">
-              ${(a.reads||[]).map(r=>`<span class="tag read">r: ${r}</span>`).join('')}
-              ${(a.writes||[]).map(w=>`<span class="tag write">w: ${w}</span>`).join('')}
-            </div>
-          </div>
-          <div class="item-btns">${editBtn('action',idx)}${delBtn('action',a.name)}</div>
-        </div>
-      </div>`).join('') || '<em style="color:#585b70;font-size:11px">none registered</em>';
-    document.getElementById('conditions-list').innerHTML = conditions.map((c, idx) => `
-      <div class="item">
-        <div class="item-row">
-          <div class="item-body">
-            <div class="name">${c.name}</div>
-            ${c.intent ? `<div class="intent">${c.intent}</div>` : ''}
-            <div class="deps">
-              ${(c.reads||[]).map(r=>`<span class="tag read">r: ${r}</span>`).join('')}
-            </div>
-          </div>
-          <div class="item-btns">${editBtn('condition',idx)}${delBtn('condition',c.name)}</div>
-        </div>
-      </div>`).join('') || '<em style="color:#585b70;font-size:11px">none registered</em>';
-    document.getElementById('blackboard-list').innerHTML = blackboard.map((k, idx) => `
-      <div class="item">
-        <div class="item-row">
-          <div class="item-body">
-            <span class="tag key">${k.key}</span>
-            <span style="font-size:10px;color:#a6adc8;margin-left:6px">${k.type}</span>
-          </div>
-          <div class="item-btns">${editBtn('key',idx)}${delBtn('key',k.key)}</div>
-        </div>
-      </div>`).join('') || '<em style="color:#585b70;font-size:11px">none declared</em>';
-    setStatus('Contracts loaded — ' + actions.length + ' actions, ' + conditions.length + ' conditions');
-  } catch (e) {
-    document.getElementById('conn-badge').textContent = 'disconnected';
-    document.getElementById('conn-badge').classList.add('disconnected');
-    setStatus('Connection failed: ' + e.message);
-  }
-}
-
 async function loadSchema() {
   try {
     const res  = await fetch('/api/schema');
     const data = await res.json();
+    document.getElementById('conn-badge').textContent = 'connected';
+    document.getElementById('conn-badge').classList.remove('disconnected');
     document.getElementById('schema-yaml').textContent = data.yaml || '(no schema file configured)';
     document.getElementById('file-path-label').textContent = data.path || '';
     document.getElementById('schema-path').textContent = data.path ? '&#x2014; ' + data.path : '';
@@ -402,6 +370,8 @@ async function loadSchema() {
     document.getElementById('save-btn').style.color = '';
     setStatus('Schema loaded from ' + (data.path || 'memory'));
   } catch (e) {
+    document.getElementById('conn-badge').textContent = 'disconnected';
+    document.getElementById('conn-badge').classList.add('disconnected');
     document.getElementById('schema-yaml').textContent = 'Error: ' + e.message;
     setStatus('Schema load failed: ' + e.message);
   }
@@ -434,9 +404,16 @@ async function runAnalysis() {
 
 async function loadTree() {
   try {
-    const [treeRes, analyzeRes] = await Promise.all([fetch('/api/tree'), fetch('/api/analyze')]);
+    const [treeRes, analyzeRes, actionsRes, conditionsRes] = await Promise.all([
+      fetch('/api/tree'), fetch('/api/analyze'),
+      fetch('/api/actions'), fetch('/api/conditions')
+    ]);
     const data    = await treeRes.json();
     const analyze = await analyzeRes.json();
+    const actions    = await actionsRes.json();
+    const conditions = await conditionsRes.json();
+    registeredActions    = new Set((actions    || []).map(a => a.name));
+    registeredConditions = new Set((conditions || []).map(c => c.name));
     if (data.error) {
       document.getElementById('svg-container').innerHTML =
         `<p style="color:#f38ba8;padding:14px;font-size:11px">Error: ${data.error}</p>`;
@@ -485,11 +462,49 @@ function behaviorIssues(beh) {
   return ` <span style="color:${col};font-size:9px">&#x25CF;</span>`;
 }
 
+let behMenuOpen = false;
+
+function toggleBehDropdown() {
+  behMenuOpen = !behMenuOpen;
+  document.getElementById('beh-menu').style.display = behMenuOpen ? 'block' : 'none';
+  if (behMenuOpen) {
+    const search = document.getElementById('beh-search');
+    search.value = '';
+    filterBehItems();
+    search.focus();
+  }
+}
+
+function closeBehDropdown() {
+  behMenuOpen = false;
+  document.getElementById('beh-menu').style.display = 'none';
+}
+
+function filterBehItems() {
+  const query = document.getElementById('beh-search').value.toLowerCase();
+  document.querySelectorAll('.beh-item').forEach(el => {
+    el.style.display = el.dataset.name.toLowerCase().includes(query) ? 'flex' : 'none';
+  });
+}
+
+document.addEventListener('click', e => {
+  if (behMenuOpen && !document.getElementById('beh-dropdown').contains(e.target)) {
+    closeBehDropdown();
+  }
+});
+
 function renderBehaviorTabs() {
   if (!treeData) { return; }
-  document.getElementById('behavior-tabs').innerHTML =
-    (treeData.behaviors||[]).map((beh, idx) =>
-      `<button class="beh-pill${idx === selectedBehavior ? ' active' : ''}" onclick="selectBehavior(${idx})">${beh.name}${beh.condition ? ' ['+beh.condition+']' : ''}${behaviorIssues(beh)}</button>`
+  const beh = treeData.behaviors[selectedBehavior];
+  const label = beh ? beh.name + (beh.condition ? ' [' + beh.condition + ']' : '') : 'select behavior';
+  document.getElementById('beh-trigger-label').textContent = label;
+  document.getElementById('beh-items').innerHTML =
+    (treeData.behaviors || []).map((b, idx) =>
+      `<div class="beh-item${idx === selectedBehavior ? ' active' : ''}" data-name="${b.name}" onclick="selectBehavior(${idx})">` +
+      `<span class="beh-item-name">${b.name}</span>` +
+      (b.condition ? `<span class="beh-item-cond">[${b.condition}]</span>` : '') +
+      behaviorIssues(b) +
+      `</div>`
     ).join('');
 }
 
@@ -497,6 +512,7 @@ function selectBehavior(idx) {
   selectedBehavior = idx;
   selectedNodeId   = null;
   updateEditPanel(null);
+  closeBehDropdown();
   renderBehaviorTabs();
   renderBehaviorTree(idx);
 }
@@ -515,6 +531,8 @@ function updateEditPanel(node) {
   if (!node) {
     emptyEl.style.display = 'block';
     formEl.style.display  = 'none';
+    document.getElementById('edit-reg-section').style.display  = 'none';
+    document.getElementById('edit-prev-section').style.display = 'none';
     return;
   }
   emptyEl.style.display = 'none';
@@ -527,6 +545,25 @@ function updateEditPanel(node) {
   const root       = currentRoot();
   const parentInfo = root ? findParentOf(root, node.id) : null;
   document.getElementById('edit-move-row').style.display = parentInfo ? 'flex' : 'none';
+  const regSection = document.getElementById('edit-reg-section');
+  if (isLeaf(node.type)) {
+    const registered = nodeRegistered(node);
+    regSection.style.display = 'block';
+    regSection.innerHTML =
+      `<span style="color:${registered ? '#a6e3a1' : '#f38ba8'};font-size:10px">` +
+      `${registered ? '&#x25CF; registered' : '&#x25CF; not registered'}</span>`;
+  } else {
+    regSection.style.display = 'none';
+  }
+  const prevSection = document.getElementById('edit-prev-section');
+  if (node._edited && node._prev) {
+    prevSection.style.display = 'block';
+    document.getElementById('edit-prev-type').textContent   = node._prev.type   || '';
+    document.getElementById('edit-prev-name').textContent   = node._prev.name   || '';
+    document.getElementById('edit-prev-policy').textContent = node._prev.policy || 'all';
+  } else {
+    prevSection.style.display = 'none';
+  }
 }
 
 function onEditTypeChange() {
@@ -541,11 +578,16 @@ function applyNodeEdit() {
   if (!root) { return; }
   const node = findNodeById(root, selectedNodeId);
   if (!node) { return; }
+  if (!node._edited) {
+    node._prev    = { type: node.type, name: node.name, policy: node.policy, children: node.children ? node.children.slice() : [] };
+    node._edited  = true;
+  }
   node.type   = document.getElementById('edit-type').value;
   node.name   = document.getElementById('edit-name').value.trim();
   node.policy = document.getElementById('edit-policy').value;
   if (!isComposite(node.type)) { node.children = []; }
   markDirty();
+  updatePendingPanel();
   renderBehaviorTree(selectedBehavior);
   updateEditPanel(findNodeById(currentRoot(), selectedNodeId));
 }
@@ -718,14 +760,25 @@ function renderBehaviorTree(idx) {
     }
   }
   const ISSUE_COLORS = { ERROR: '#f38ba8', WARNING: '#fab387' };
+  // Build active-path lookup from latest tick state for overlay.
+  const activePathMap = {};
+  if (latestTickState && latestTickState.activePath) {
+    for (const ap of latestTickState.activePath) { activePathMap[ap.name] = ap.status; }
+  }
   for (const node of all) {
-    const col     = NODE_COLORS[node.type] || '#cdd6f4';
+    const col     = node._edited ? '#f9e2af' : (NODE_COLORS[node.type] || '#cdd6f4');
     const nx      = node._x - NODE_W / 2;
     const nm      = (node.name||'').length > 14 ? (node.name||'').slice(0,13)+'…' : (node.name||'');
     const sel     = node.id === selectedNodeId;
     const issueSev = issueMap[node.path];
     const issueCol = issueSev ? ISSUE_COLORS[issueSev] : null;
     const strW    = sel ? '2.5' : '1.5';
+    const activeStatus = activePathMap[node.name];
+    const activeCol    = activeStatus ? TICK_STATUS_COLORS[activeStatus] : null;
+    if (activeCol) {
+      nodes += `<rect x="${nx-4}" y="${node._y-4}" width="${NODE_W+8}" height="${NODE_H+8}" rx="9" fill="${activeCol}" opacity="0.12"/>`;
+      nodes += `<rect x="${nx-4}" y="${node._y-4}" width="${NODE_W+8}" height="${NODE_H+8}" rx="9" fill="none" stroke="${activeCol}" stroke-width="2.5" opacity="0.85"/>`;
+    }
     if (issueCol) {
       nodes += `<rect x="${nx-4}" y="${node._y-4}" width="${NODE_W+8}" height="${NODE_H+8}" rx="9" fill="${issueCol}" opacity="0.15"/>`;
       nodes += `<rect x="${nx-4}" y="${node._y-4}" width="${NODE_W+8}" height="${NODE_H+8}" rx="9" fill="none" stroke="${issueCol}" stroke-width="1.5" opacity="0.6"/>`;
@@ -736,6 +789,12 @@ function renderBehaviorTree(idx) {
     nodes += `<rect x="${nx}" y="${node._y}" width="${NODE_W}" height="${NODE_H}" rx="6" fill="#181825" stroke="${col}" stroke-width="${strW}" style="cursor:pointer" onclick="selectNode(${node.id})"/>`;
     nodes += `<text x="${node._x}" y="${node._y+14}" text-anchor="middle" fill="${col}" font-size="9" font-family="monospace" pointer-events="none">${(node.type||'').toUpperCase()}</text>`;
     nodes += `<text x="${node._x}" y="${node._y+29}" text-anchor="middle" fill="#cdd6f4" font-size="11" font-family="monospace" pointer-events="none">${nm}</text>`;
+    if (isLeaf(node.type)) {
+      const regCol = nodeRegistered(node) ? '#a6e3a1' : '#f38ba8';
+      const regX   = nx + 6;
+      const regY   = node._y + 6;
+      nodes += `<circle cx="${regX}" cy="${regY}" r="4" fill="${regCol}" opacity="0.9"/>`;
+    }
     if (issueCol) {
       nodes += `<circle cx="${nx+NODE_W-4}" cy="${node._y+4}" r="5" fill="${issueCol}"/>`;
       nodes += `<text x="${nx+NODE_W-4}" y="${node._y+8}" text-anchor="middle" fill="#1e1e2e" font-size="8" font-family="monospace" font-weight="bold" pointer-events="none">${issueSev === 'ERROR' ? '!' : '?'}</text>`;
@@ -745,7 +804,24 @@ function renderBehaviorTree(idx) {
     `<svg width="${svgW}" height="${svgH}">${edges}${nodes}</svg>`;
 }
 
-loadContracts();
+async function pollTickState() {
+  try {
+    const res = await fetch('/api/tickstate');
+    const ts  = await res.json();
+    if (ts.tick > 0) {
+      const changed = !latestTickState || latestTickState.tick !== ts.tick;
+      latestTickState = ts;
+      // Only re-render when the graph view is visible, no pending edits, and
+      // the tick actually advanced — avoid disrupting user interaction.
+      const graphVisible = document.getElementById('graph-view').style.display !== 'none';
+      if (changed && treeData && graphVisible && !isDirty && selectedNodeId === null) {
+        renderBehaviorTree(selectedBehavior);
+      }
+    }
+  } catch (_) {}
+}
+
+setInterval(pollTickState, 500);
 loadSchema();
 </script>
 </body>
@@ -1086,8 +1162,59 @@ std::string EditorServer::getTreeJson() const {
     }
 }
 
-bool EditorServer::saveSchema(std::string_view yaml) const {
-    return writeFile(schemaPath_, yaml);
+void EditorServer::attachTree(BehaviorTree* tree,
+                               const LoaderRegistry& reg) noexcept {
+    attachedTree_ = tree;
+    attachedReg_  = &reg;
+}
+
+void EditorServer::attachEmitter(DecisionEmitter* emitter) noexcept {
+    attachedEmitter_ = emitter;
+}
+
+std::string EditorServer::getTickStateJson() const {
+    if (attachedEmitter_ == nullptr || attachedEmitter_->history().empty()) {
+        return R"({"tick":0,"behavior":"","status":"RUNNING","activePath":[]})";
+    }
+    const auto& rec = attachedEmitter_->history().back();
+    std::string out = R"({"tick":)";
+    out += std::to_string(rec.tickNumber);
+    out += R"(,"behavior":")";
+    out += rec.behaviorName;
+    out += R"(","status":")";
+    switch (rec.result) {
+        case Status::SUCCESS: out += "SUCCESS"; break;
+        case Status::FAILURE: out += "FAILURE"; break;
+        case Status::RUNNING: out += "RUNNING"; break;
+    }
+    out += R"(","activePath":[)";
+    for (std::size_t i = 0; i < rec.activePath.size(); ++i) {
+        if (i > 0) { out += ','; }
+        out += R"({"name":")";
+        out += rec.activePath[i].name;
+        out += R"(","status":")";
+        switch (rec.activePath[i].status) {
+            case Status::SUCCESS: out += "SUCCESS"; break;
+            case Status::FAILURE: out += "FAILURE"; break;
+            case Status::RUNNING: out += "RUNNING"; break;
+        }
+        out += R"("})";
+    }
+    out += "]}";
+    return out;
+}
+
+bool EditorServer::saveSchema(std::string_view yaml) {
+    if (!writeFile(schemaPath_, yaml)) { return false; }
+    if (attachedTree_ != nullptr) {
+        try {
+            attachedTree_->reload(SchemaLoader::load(yaml, *attachedReg_));
+        } catch (...) {
+            // Schema saved but reload failed (e.g. unknown action name).
+            // Leave the running tree unchanged.
+        }
+    }
+    return true;
 }
 
 void EditorServer::putAction(std::string_view name, std::string_view intent,
@@ -1159,6 +1286,10 @@ void EditorServer::start(int port) {
 
     impl_->server.Get("/api/tree", [this](const httplib::Request& /*req*/, httplib::Response& res) {
         res.set_content(getTreeJson(), "application/json");
+    });
+
+    impl_->server.Get("/api/tickstate", [this](const httplib::Request& /*req*/, httplib::Response& res) {
+        res.set_content(getTickStateJson(), "application/json");
     });
 
     impl_->server.Put("/api/actions", [this](const httplib::Request& req, httplib::Response& res) {

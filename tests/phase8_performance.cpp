@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <stdexcept>
 #include <string>
+#include <tuple>
 
 #include "bt/Action.h"
 #include "bt/BehaviorTree.h"
@@ -397,4 +399,48 @@ TEST(Phase8_TreeUtils, DeepCloneIsIndependent) {
     // Mutate clone — original is unaffected.
     clone->name = "modified";
     EXPECT_EQ(original->name, "seq");
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+// LazySubtree — factory error handling
+// ───────────────────────────────────────────────────────────────────────────────
+
+TEST(Phase8_LazySubtree, ThrowingFactoryReturnsFAILURE) {
+    auto factory = []() -> std::unique_ptr<bt::Node> {
+        throw std::runtime_error("factory exploded");
+    };
+    bt::LazySubtree lazy("bad_lazy", std::move(factory));
+    EXPECT_EQ(lazy.tick(), bt::Status::FAILURE);
+    EXPECT_FALSE(lazy.factoryError().empty());
+    EXPECT_NE(lazy.factoryError().find("factory exploded"), std::string::npos);
+}
+
+TEST(Phase8_LazySubtree, ThrowingFactoryDoesNotMaterialize) {
+    auto factory = []() -> std::unique_ptr<bt::Node> {
+        throw std::runtime_error("oops");
+    };
+    bt::LazySubtree lazy("bad_lazy", std::move(factory));
+    std::ignore = lazy.tick();
+    EXPECT_FALSE(lazy.materialized());
+}
+
+TEST(Phase8_LazySubtree, ThrowingFactoryReturnsFAILUREOnSubsequentTicks) {
+    int calls = 0;
+    auto factory = [&calls]() -> std::unique_ptr<bt::Node> {
+        ++calls;
+        throw std::runtime_error("always fails");
+    };
+    bt::LazySubtree lazy("bad_lazy", std::move(factory));
+    EXPECT_EQ(lazy.tick(), bt::Status::FAILURE);
+    EXPECT_EQ(lazy.tick(), bt::Status::FAILURE);
+    // Factory should not be retried after the first failure
+    EXPECT_EQ(calls, 1);
+}
+
+TEST(Phase8_LazySubtree, FactoryErrorIsEmptyBeforeFirstTick) {
+    auto factory = []() -> std::unique_ptr<bt::Node> {
+        return std::make_unique<bt::Sequence>("seq");
+    };
+    bt::LazySubtree lazy("good_lazy", std::move(factory));
+    EXPECT_TRUE(lazy.factoryError().empty());
 }

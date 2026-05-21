@@ -80,11 +80,18 @@ Both files are listed in `.gitignore` and will not be committed.
 |--------|----------|-------------|
 | `GET` | `/` | Visual editor UI |
 | `GET` | `/api/actions` | All registered actions (name, intent, reads, writes) |
+| `PUT` | `/api/actions` | Add or update an action contract |
+| `DELETE` | `/api/actions/:name` | Remove an action contract |
 | `GET` | `/api/conditions` | All registered conditions |
+| `PUT` | `/api/conditions` | Add or update a condition contract |
+| `DELETE` | `/api/conditions/:name` | Remove a condition contract |
 | `GET` | `/api/blackboard` | All declared blackboard keys |
+| `PUT` | `/api/blackboard` | Add or update a blackboard key declaration |
+| `DELETE` | `/api/blackboard/:key` | Remove a blackboard key declaration |
 | `GET` | `/api/schema` | Current schema YAML wrapped in JSON |
 | `POST` | `/api/schema` | Save updated schema YAML to disk |
 | `GET` | `/api/analyze` | Run complexity analyzer — returns issues + metrics |
+| `GET` | `/api/tickstate` | Latest tick record — active path, statuses, tick number |
 
 ## Stopping
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <deque>
 #include <limits>
 #include <optional>
 #include <string>
@@ -23,7 +24,7 @@ class MonitorQuery {
 public:
     explicit MonitorQuery(const DecisionEmitter& emitter) noexcept : emitter_(&emitter) {}
 
-    [[nodiscard]] const std::vector<TickRecord>& all() const noexcept {
+    [[nodiscard]] const std::deque<TickRecord>& all() const noexcept {
         return emitter_->history();
     }
 

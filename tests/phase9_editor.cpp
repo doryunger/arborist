@@ -6,9 +6,11 @@
 
 #include <httplib.h>
 
+#include "bt/BehaviorTree.h"
 #include "bt/EditorServer.h"
 #include "bt/RegistryStore.h"
 #include "bt/RegistrySpec.h"
+#include "bt/SchemaLoader.h"
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Phase 9 — Editor Server API
@@ -670,4 +672,259 @@ TEST(Phase9_EditorServer, HttpIntegration_AllEndpoints) {
 
     editor.stop();
     std::filesystem::remove(tmpPath);
+}
+
+// ── Hot-reload: attachTree (Gap 6) ────────────────────────────────────────────
+
+namespace {
+
+static constexpr std::string_view kHotReloadPatrolYaml = R"(
+schema_version: "1.0"
+behaviors:
+  - name: patrol
+    tree:
+      type: action
+      name: walk_waypoint
+)";
+
+static constexpr std::string_view kHotReloadCombatYaml = R"(
+schema_version: "1.0"
+behaviors:
+  - name: combat
+    tree:
+      type: action
+      name: attack
+)";
+
+bt::LoaderRegistry makeHotReloadRegistry() {
+    bt::LoaderRegistry reg;
+    reg.actions["walk_waypoint"] = [] { return bt::Status::RUNNING; };
+    reg.actions["attack"]        = [] { return bt::Status::RUNNING; };
+    return reg;
+}
+
+}  // namespace
+
+TEST(Phase9_EditorServer, AttachTreeChangesActiveBehaviorAfterSave) {
+    const std::string tmpPath = "/tmp/bt_test_reload_attach.yaml";
+    { std::ofstream f(tmpPath); f << kHotReloadPatrolYaml; }
+
+    bt::LoaderRegistry reg = makeHotReloadRegistry();
+    bt::BehaviorTree tree = bt::SchemaLoader::load(kHotReloadPatrolYaml, reg);
+    ASSERT_EQ(tree.behaviors().size(), 1u);
+    ASSERT_EQ(tree.behaviors()[0].name, "patrol");
+
+    bt::RegistryStore store(":memory:");
+    bt::EditorServer editor(store, tmpPath);
+    editor.attachTree(&tree, reg);
+
+    ASSERT_TRUE(editor.saveSchema(kHotReloadCombatYaml));
+
+    ASSERT_EQ(tree.behaviors().size(), 1u);
+    EXPECT_EQ(tree.behaviors()[0].name, "combat");
+
+    std::filesystem::remove(tmpPath);
+}
+
+TEST(Phase9_EditorServer, SaveWithNoAttachedTreeDoesNotCrash) {
+    const std::string tmpPath = "/tmp/bt_test_reload_noattach.yaml";
+    bt::RegistryStore store(":memory:");
+    bt::EditorServer editor(store, tmpPath);
+    EXPECT_TRUE(editor.saveSchema(kHotReloadPatrolYaml));
+    std::filesystem::remove(tmpPath);
+}
+
+TEST(Phase9_EditorServer, AttachTreeReloadFailsGracefullyOnUnknownAction) {
+    const std::string tmpPath = "/tmp/bt_test_reload_unknown.yaml";
+    { std::ofstream f(tmpPath); f << kHotReloadPatrolYaml; }
+
+    bt::LoaderRegistry reg = makeHotReloadRegistry();
+    bt::BehaviorTree tree = bt::SchemaLoader::load(kHotReloadPatrolYaml, reg);
+
+    bt::RegistryStore store(":memory:");
+    bt::EditorServer editor(store, tmpPath);
+    editor.attachTree(&tree, reg);
+
+    // YAML references "fire_laser" which is not registered — SchemaLoader will throw.
+    // File must be saved; tree must remain unchanged (no crash).
+    static constexpr std::string_view kUnknownYaml = R"(
+schema_version: "1.0"
+behaviors:
+  - name: combat
+    tree:
+      type: action
+      name: fire_laser
+)";
+
+    EXPECT_TRUE(editor.saveSchema(kUnknownYaml));
+    // Tree was not reloaded — original behavior still in place.
+    ASSERT_EQ(tree.behaviors().size(), 1u);
+    EXPECT_EQ(tree.behaviors()[0].name, "patrol");
+
+    std::filesystem::remove(tmpPath);
+}
+
+TEST(Phase9_EditorServer, AttachTreeReloadsOnHttpPost) {
+    const std::string tmpPath = "/tmp/bt_test_reload_http.yaml";
+    { std::ofstream f(tmpPath); f << kHotReloadPatrolYaml; }
+
+    bt::LoaderRegistry reg = makeHotReloadRegistry();
+    bt::BehaviorTree tree = bt::SchemaLoader::load(kHotReloadPatrolYaml, reg);
+
+    bt::RegistryStore store(":memory:");
+    bt::EditorServer editor(store, tmpPath);
+    editor.attachTree(&tree, reg);
+    editor.start(18086);
+
+    httplib::Client client("localhost", 18086);
+    client.set_connection_timeout(2);
+
+    std::string escaped;
+    for (char c : std::string(kHotReloadCombatYaml)) {
+        if (c == '"') escaped += "\\\"";
+        else if (c == '\n') escaped += "\\n";
+        else escaped += c;
+    }
+    const std::string body = "{\"yaml\":\"" + escaped + "\"}";
+    auto res = client.Post("/api/schema", body, "application/json");
+    ASSERT_NE(res, nullptr);
+    EXPECT_EQ(res->status, 200);
+
+    ASSERT_EQ(tree.behaviors().size(), 1u);
+    EXPECT_EQ(tree.behaviors()[0].name, "combat");
+
+    editor.stop();
+    std::filesystem::remove(tmpPath);
+}
+
+TEST(Phase9_EditorServer, AttachTreeReloadedSchemaTicksCorrectly) {
+    const std::string tmpPath = "/tmp/bt_test_reload_tick.yaml";
+    { std::ofstream f(tmpPath); f << kHotReloadPatrolYaml; }
+
+    int patrolTicks = 0;
+    int combatTicks = 0;
+    bt::LoaderRegistry reg;
+    reg.actions["walk_waypoint"] = [&patrolTicks] { ++patrolTicks; return bt::Status::RUNNING; };
+    reg.actions["attack"]        = [&combatTicks] { ++combatTicks; return bt::Status::RUNNING; };
+
+    bt::BehaviorTree tree = bt::SchemaLoader::load(kHotReloadPatrolYaml, reg);
+    tree.tick();
+    EXPECT_EQ(patrolTicks, 1);
+    EXPECT_EQ(combatTicks, 0);
+
+    bt::RegistryStore store(":memory:");
+    bt::EditorServer editor(store, tmpPath);
+    editor.attachTree(&tree, reg);
+    ASSERT_TRUE(editor.saveSchema(kHotReloadCombatYaml));
+
+    tree.tick();
+    EXPECT_EQ(patrolTicks, 1);  // no new patrol ticks
+    EXPECT_EQ(combatTicks, 1);  // combat ran
+
+    std::filesystem::remove(tmpPath);
+}
+
+// ── Live tick overlay: attachEmitter / getTickStateJson (Gap 7) ───────────────
+
+TEST(Phase9_EditorServer, TickStateJsonWithNoEmitterReturnsEmptyState) {
+    bt::RegistryStore store(":memory:");
+    bt::EditorServer editor(store);
+    const std::string json = editor.getTickStateJson();
+    // Must be valid JSON with expected fields, no data.
+    EXPECT_NE(json.find("\"tick\""),       std::string::npos);
+    EXPECT_NE(json.find("\"behavior\""),   std::string::npos);
+    EXPECT_NE(json.find("\"activePath\""), std::string::npos);
+    EXPECT_NE(json.find("\"0\"") + json.find(":0"),  std::string::npos);  // tick is 0
+}
+
+TEST(Phase9_EditorServer, TickStateJsonReflectsLatestTickRecord) {
+    bt::LoaderRegistry reg = makeHotReloadRegistry();
+    bt::DecisionEmitter emitter;
+    bt::BehaviorTree tree = bt::SchemaLoader::load(kHotReloadPatrolYaml, reg);
+    tree.setEmitter(&emitter);
+    tree.tick();
+
+    bt::RegistryStore store(":memory:");
+    bt::EditorServer editor(store);
+    editor.attachEmitter(&emitter);
+
+    const std::string json = editor.getTickStateJson();
+    EXPECT_NE(json.find("\"tick\":1"),    std::string::npos);
+    EXPECT_NE(json.find("patrol"),        std::string::npos);
+}
+
+TEST(Phase9_EditorServer, TickStateJsonContainsActivePath) {
+    bt::LoaderRegistry reg = makeHotReloadRegistry();
+    bt::DecisionEmitter emitter;
+    bt::BehaviorTree tree = bt::SchemaLoader::load(kHotReloadPatrolYaml, reg);
+    tree.setEmitter(&emitter);
+    tree.tick();
+
+    bt::RegistryStore store(":memory:");
+    bt::EditorServer editor(store);
+    editor.attachEmitter(&emitter);
+
+    const std::string json = editor.getTickStateJson();
+    EXPECT_NE(json.find("\"activePath\""), std::string::npos);
+    // The patrol tree has at least one node: walk_waypoint
+    EXPECT_NE(json.find("walk_waypoint"), std::string::npos);
+}
+
+TEST(Phase9_EditorServer, TickStateJsonUpdatesOnSubsequentTicks) {
+    bt::LoaderRegistry reg = makeHotReloadRegistry();
+    bt::DecisionEmitter emitter;
+    bt::BehaviorTree tree = bt::SchemaLoader::load(kHotReloadPatrolYaml, reg);
+    tree.setEmitter(&emitter);
+
+    bt::RegistryStore store(":memory:");
+    bt::EditorServer editor(store);
+    editor.attachEmitter(&emitter);
+
+    tree.tick();
+    const std::string json1 = editor.getTickStateJson();
+    EXPECT_NE(json1.find("\"tick\":1"), std::string::npos);
+
+    tree.tick();
+    const std::string json2 = editor.getTickStateJson();
+    EXPECT_NE(json2.find("\"tick\":2"), std::string::npos);
+}
+
+TEST(Phase9_EditorServer, TickStateJsonActivePathHasStatus) {
+    bt::LoaderRegistry reg = makeHotReloadRegistry();
+    bt::DecisionEmitter emitter;
+    bt::BehaviorTree tree = bt::SchemaLoader::load(kHotReloadPatrolYaml, reg);
+    tree.setEmitter(&emitter);
+    tree.tick();
+
+    bt::RegistryStore store(":memory:");
+    bt::EditorServer editor(store);
+    editor.attachEmitter(&emitter);
+
+    const std::string json = editor.getTickStateJson();
+    // Each active-path entry must have a "status" field.
+    EXPECT_NE(json.find("\"status\""), std::string::npos);
+}
+
+TEST(Phase9_EditorServer, HttpTickstateEndpointServes) {
+    bt::LoaderRegistry reg = makeHotReloadRegistry();
+    bt::DecisionEmitter emitter;
+    bt::BehaviorTree tree = bt::SchemaLoader::load(kHotReloadPatrolYaml, reg);
+    tree.setEmitter(&emitter);
+    tree.tick();
+
+    bt::RegistryStore store(":memory:");
+    bt::EditorServer editor(store);
+    editor.attachEmitter(&emitter);
+    editor.start(18087);
+
+    httplib::Client client("localhost", 18087);
+    client.set_connection_timeout(2);
+    auto res = client.Get("/api/tickstate");
+    ASSERT_NE(res, nullptr);
+    EXPECT_EQ(res->status, 200);
+    EXPECT_NE(res->body.find("patrol"),       std::string::npos);
+    EXPECT_NE(res->body.find("activePath"),   std::string::npos);
+    EXPECT_NE(res->body.find("walk_waypoint"), std::string::npos);
+
+    editor.stop();
 }
