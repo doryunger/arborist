@@ -22,6 +22,15 @@ This document explains the core framework internals: the design decisions behind
 14. [LazySubtree — deferred materialization](#14-lazysubtree--deferred-materialization)
 15. [TickPool — multi-agent threading](#15-tickpool--multi-agent-threading)
 
+**Appendix**
+- [A. Ownership and Memory](#a-ownership-and-memory) — `unique_ptr`, `shared_ptr`, move semantics
+- [B. Polymorphism and Dispatch](#b-polymorphism-and-dispatch) — `virtual`, pure virtual, NVI, `dynamic_cast`, `override`
+- [C. Type Erasure](#c-type-erasure) — `std::any`, `std::function`, `type_index`
+- [D. Concurrency Primitives](#d-concurrency-primitives) — `thread_local`, `mutex`, `condition_variable`
+- [E. Language Features and Qualifiers](#e-language-features-and-qualifiers) — `[[nodiscard]]`, `noexcept`, `= delete`, `enum class`, `constexpr`
+- [F. Standard Types](#f-standard-types) — `optional`, sized integers, `string_view`
+- [G. Templates](#g-templates) — `template <typename T>`, instantiation
+
 ---
 
 ## 1. Status — the three-state contract
@@ -784,3 +793,340 @@ for (const auto& err : pool.lastErrors()) {
 ```
 
 `lastErrors()` is cleared at the start of each `tickAll()` call, so it always reflects only the most recent frame's failures. An agent that throws once is ticked normally on subsequent frames — the error is reported, not permanent.
+
+---
+
+## Appendix — C++ Reference
+
+This appendix explains the C++ language features and standard library types used throughout the framework. Each entry describes the concept, how it works, and where it appears in the codebase.
+
+---
+
+### A. Ownership and Memory
+
+#### `std::unique_ptr<T>`
+
+A smart pointer that holds exclusive ownership of a heap-allocated object. When the `unique_ptr` goes out of scope or is destroyed, it automatically deletes the object it owns — no manual `delete` required. This is RAII (Resource Acquisition Is Initialization): the lifetime of the resource is tied to the lifetime of the owning object.
+
+`unique_ptr` cannot be copied — copying would produce two owners for the same object, which would cause a double-free. It can only be *moved*, transferring ownership to a new pointer and leaving the original empty (`nullptr`).
+
+```cpp
+auto node = std::make_unique<Sequence>("root");  // allocates, owns
+// node is destroyed here — Sequence is deleted automatically
+```
+
+In this framework, `unique_ptr` is the exclusive ownership mechanism for all nodes. `CompositeNode` owns its children via `std::vector<std::unique_ptr<Node>>`. The entire node tree is a chain of `unique_ptr` links — destroying the root destroys the whole tree.
+
+#### `std::shared_ptr<T>`
+
+A smart pointer that shares ownership of an object among multiple holders. It maintains a reference count: each copy of the `shared_ptr` increments the count; each destruction decrements it. When the count reaches zero, the object is deleted.
+
+Unlike `unique_ptr`, `shared_ptr` is copyable — the copy shares ownership and increments the count.
+
+```cpp
+auto a = std::make_shared<SchemaNode>(...);
+auto b = a;  // both a and b own the same SchemaNode; count = 2
+// when both go out of scope, count → 0 → SchemaNode is deleted
+```
+
+`shared_ptr` is used in `LazySubtree` specifically because `std::function` requires its captured values to be copyable, and `unique_ptr` is not. The schema clone is wrapped in `shared_ptr` so the lambda can be stored in `std::function`. Once materialized, `factory_` is set to `nullptr`, dropping the last reference and freeing the schema.
+
+#### Move semantics and `std::move`
+
+Move semantics allow a resource to be *transferred* from one object to another without copying it. A move leaves the source in a valid but empty state (typically `nullptr` for pointers or an empty container). Moving is cheap — it avoids allocating new memory and copying data.
+
+`std::move` is a cast: it tells the compiler to treat the value as an *rvalue* (a temporary or a value you are done with), enabling the move constructor or move assignment operator.
+
+```cpp
+auto root = std::make_unique<Selector>("root");
+BehaviorTree bt(std::move(root), ...);
+// root is now nullptr; bt owns the Selector
+```
+
+Throughout the loader, `std::move` transfers `unique_ptr` ownership into the tree being built. `std::move` on a `Blackboard` or `LoaderRegistry` avoids copying the entire map structure when passing to `BehaviorTree`.
+
+---
+
+### B. Polymorphism and Dispatch
+
+#### `virtual` functions and the vtable
+
+When a function is declared `virtual` in a base class, C++ uses *dynamic dispatch* to call the correct override at runtime. The mechanism is a *vtable* (virtual dispatch table): each class with virtual functions has a hidden table of function pointers. Every object of that class stores a pointer to its class's vtable. When a virtual function is called through a base pointer, the vtable is consulted and the right function is called — regardless of what the compile-time type of the pointer is.
+
+```cpp
+Node* n = new Sequence("s");
+n->doTick();  // calls Sequence::doTick(), not Node::doTick()
+              // decided at runtime via vtable lookup
+```
+
+This is what allows the framework to hold all nodes as `Node*` or `unique_ptr<Node>` and call `tick()` without knowing the concrete type. Every `Sequence`, `Selector`, `Parallel`, `Action`, and `Condition` has its own vtable entry for `doTick()`.
+
+The cost of a virtual call is one extra pointer dereference (vtable lookup). For a node tree ticked every frame this is negligible, but it is non-zero — which is why the NVI pattern is used rather than making `tick()` itself virtual.
+
+#### Pure virtual (`= 0`) and abstract classes
+
+A function declared `virtual Status doTick() = 0` is *pure virtual*. The class that declares it becomes *abstract* — it cannot be instantiated directly. Any concrete subclass must provide an implementation, or it is also abstract.
+
+```cpp
+class Node {
+    virtual Status doTick() = 0;  // pure virtual — Node is abstract
+};
+
+class Sequence : public Node {
+    Status doTick() override { ... }  // provides the implementation
+};
+```
+
+`Node` is abstract. You cannot write `Node n;` — the compiler rejects it. You can only instantiate `Sequence`, `Selector`, etc. The pure virtual declaration acts as an interface contract: every node type must implement `doTick()`.
+
+#### The `override` keyword
+
+`override` on a method declaration tells the compiler that this method is intended to override a virtual function from a base class. If the signature does not match any virtual function in the base, it is a compile error — catching mistakes like typos or signature drift.
+
+```cpp
+Status doTick() override;   // compile error if Node has no matching virtual
+```
+
+Without `override`, a mismatched signature silently creates a *new* function that hides the base version, rather than overriding it — a common source of subtle bugs.
+
+#### Non-Virtual Interface (NVI)
+
+NVI is a design pattern where the public function is non-virtual and the override point is a protected virtual function. The public function calls the virtual one after performing fixed pre/post work.
+
+```cpp
+// public, non-virtual — callers use this
+Status Node::tick() {
+    lastTickId_ = gCurrentTickId;   // always happens
+    lastStatus_ = doTick();         // delegates to subclass
+    return lastStatus_;
+}
+
+// protected, pure virtual — subclasses override this
+virtual Status doTick() = 0;
+```
+
+If `tick()` were virtual, subclasses would have to remember to call `Node::tick()` at the start of every override to ensure the stamp happens. Forgetting would silently break the tick-ID mechanism. NVI makes the invariant impossible to violate: the stamp is in non-virtual code that the subclass cannot bypass.
+
+#### `dynamic_cast`
+
+`dynamic_cast` performs a safe base-to-derived cast at runtime. It uses the vtable to verify the actual type of the object. If the cast is invalid, it returns `nullptr` (for pointer casts) or throws `std::bad_cast` (for reference casts).
+
+```cpp
+Node* n = ...;
+Sequence* seq = dynamic_cast<Sequence*>(n);  // nullptr if n is not a Sequence
+```
+
+This is the only safe way to cast from a base class pointer to a derived class pointer in C++. `static_cast` performs the same cast without the runtime check — it is undefined behavior if the object is not actually of the target type. This framework bans `static_cast` for base-to-derived casts precisely because a silent miscast is harder to debug than a `nullptr` check.
+
+---
+
+### C. Type Erasure
+
+#### `std::any`
+
+`std::any` is a type-safe container that can hold a value of any copyable type. The stored type is remembered internally; reading it back requires knowing the correct type and using `std::any_cast<T>`. Casting to the wrong type throws `std::bad_any_cast`.
+
+```cpp
+std::any val = 42;
+int x = std::any_cast<int>(val);   // ok
+float y = std::any_cast<float>(val); // throws bad_any_cast
+```
+
+The Blackboard uses `std::any` as the value type in its `values_` map. This allows a single `unordered_map<string, any>` to hold integers, floats, booleans, and custom types without the Blackboard needing to know what types will be stored. The tradeoff: type errors are runtime failures, not compile-time failures. The `typeRegistry_` exists to catch mismatches early and produce useful error messages rather than cryptic `bad_any_cast` exceptions.
+
+#### `std::function<F>`
+
+`std::function<F>` is a type-erased callable. It can hold any callable that matches the signature `F`: a free function, a lambda, a method bound with `std::bind`, or a functor. The concrete type of the callable is hidden behind the `std::function` interface.
+
+```cpp
+std::function<Status()> action;
+action = []() { return Status::SUCCESS; };    // lambda
+action = &MyClass::myAction;                  // free function
+action();  // calls whatever was stored
+```
+
+In the framework, action and condition lambdas are stored as `std::function<Status()>` and `std::function<bool()>`. The `LoaderRegistry` maps names to `std::function` values, allowing the loader to call actions by name without knowing their concrete implementation type.
+
+The key constraint: `std::function` requires the callable to be *copyable*. This is why `LazySubtree` must use `shared_ptr` rather than `unique_ptr` in its captured lambda — `unique_ptr` is not copyable.
+
+#### `std::type_index` and `typeid`
+
+`typeid(T)` returns a `std::type_info` object representing the type `T` at runtime. `std::type_index` wraps `type_info` to make it usable as a map key (it supports `==` and hashing).
+
+```cpp
+std::type_index tid(typeid(int));    // represents int
+std::type_index tid2(typeid(float)); // represents float
+tid == tid2;  // false
+```
+
+The Blackboard's `typeRegistry_` maps key names to `type_index` values. The first time a key is written with type `T`, `typeid(T)` is stored. On subsequent writes, the stored `type_index` is compared to `typeid(T)`. If they differ, the access is rejected. This provides runtime type safety without templates in the storage layer.
+
+---
+
+### D. Concurrency Primitives
+
+#### `thread_local`
+
+`thread_local` declares a variable that has a separate instance per thread. Every thread that accesses a `thread_local` variable sees its own copy; writes in one thread are invisible to other threads.
+
+```cpp
+thread_local std::uint64_t gCurrentTickId{0};
+```
+
+Each `WorkerSlot` thread has its own `gCurrentTickId`. When thread 0 sets its copy to `100` before ticking its agents, thread 1's copy is unaffected. Without `thread_local`, a global would require a mutex, serializing all tick ID updates and becoming a bottleneck.
+
+#### `std::mutex` and `std::lock_guard` / `std::unique_lock`
+
+A `mutex` (mutual exclusion) is a synchronization primitive that only one thread can hold at a time. A thread that tries to acquire a locked mutex blocks until it is released.
+
+`lock_guard` is a RAII wrapper: it locks the mutex on construction and unlocks it on destruction. The lock is always released when the `lock_guard` goes out of scope, even if an exception is thrown.
+
+`unique_lock` is a more flexible RAII wrapper that supports deferred locking, manual unlock, and use with condition variables.
+
+```cpp
+{
+    std::lock_guard guard(slot->mu);   // locked here
+    slot->tickDone = true;
+}                                       // unlocked here (guard destroyed)
+```
+
+In `TickPool`, mutexes protect the `shouldTick`, `tickDone`, and `stop` flags shared between the main thread and worker threads. `lock_guard` is used for simple flag writes; `unique_lock` is used when waiting on a condition variable (which requires the ability to temporarily release the lock).
+
+#### `std::condition_variable`
+
+A condition variable allows one thread to wait until another thread signals that a condition is true. Waiting releases the associated mutex (allowing other threads to acquire it) and re-acquires it when the thread is woken.
+
+```cpp
+// waiting thread
+std::unique_lock<std::mutex> lock(slot->mu);
+slot->cv.wait(lock, [slot] { return slot->shouldTick || slot->stop; });
+
+// signalling thread
+{ std::lock_guard guard(slot->mu); slot->shouldTick = true; }
+slot->cv.notify_one();
+```
+
+`cv.wait(lock, predicate)` is a *spurious wakeup*-safe form: even if the thread wakes for no reason, it re-evaluates the predicate and goes back to sleep if it is false. In `TickPool`, worker threads sleep on their condition variable until the main thread signals a tick, then signal back when the tick is complete.
+
+---
+
+### E. Language Features and Qualifiers
+
+#### `[[nodiscard]]`
+
+An attribute that causes a compiler warning if the return value of a function is discarded (the call result is not assigned or used).
+
+```cpp
+[[nodiscard]] Status tick();
+```
+
+`tick()` is `[[nodiscard]]` because ignoring its return value is almost always a bug — the caller likely needs to know whether the tree returned `RUNNING`, `SUCCESS`, or `FAILURE` to decide what to do next. The attribute converts a silent logic error into a visible compiler warning.
+
+#### `noexcept`
+
+A specifier that declares a function will not throw exceptions. The compiler can use this to generate more efficient code (no exception unwinding tables for the function). Calling a `noexcept` function through a `noexcept` call chain guarantees no exceptions propagate.
+
+```cpp
+void advanceChildIndex() noexcept { ++currentChildIndex_; }
+```
+
+Functions that only increment an integer or compare enum values have no plausible throw path. Marking them `noexcept` documents the intent and allows the compiler to optimize.
+
+#### `= delete`
+
+Explicitly deletes a special member function. Any code that tries to use the deleted function gets a compile error with a clear message, rather than a confusing link error or silent undefined behavior.
+
+```cpp
+Node(const Node&) = delete;             // copy constructor deleted
+Node& operator=(const Node&) = delete;  // copy assignment deleted
+Node(Node&&) = delete;                  // move constructor deleted
+Node& operator=(Node&&) = delete;       // move assignment deleted
+```
+
+By default, C++ will attempt to synthesize copy and move operations for any class. For `Node`, both are semantically wrong (see section 2). `= delete` makes the intent explicit and surfaces misuse at compile time.
+
+#### `enum class`
+
+A *scoped enumeration*. Enumerators are scoped to the enum type name and do not implicitly convert to integers.
+
+```cpp
+enum class Status : std::uint8_t { SUCCESS = 0, FAILURE = 1, RUNNING = 2 };
+
+Status s = Status::SUCCESS;  // must qualify with Status::
+int x = s;                   // compile error — no implicit conversion
+```
+
+Compare with plain `enum`: `enum Status { SUCCESS, FAILURE, RUNNING }` allows `int x = SUCCESS;` and `if (s == 0)` — both error-prone. `enum class` eliminates accidental integer promotion and comparison with raw values. The `: std::uint8_t` base specifies the underlying storage type explicitly.
+
+#### `constexpr`
+
+Declares that a variable or function can be evaluated at compile time. For variables, it replaces `#define` constants with typed, scoped values. For functions, the compiler may evaluate the function during compilation if given constant arguments.
+
+```cpp
+constexpr std::size_t kDefaultLazyThreshold = 10;
+```
+
+`#define kDefaultLazyThreshold 10` is a text substitution with no type, no scope, and no debugger visibility. `constexpr` values have a type, obey scope rules, and appear in the debugger. They cannot cause macro-expansion surprises.
+
+---
+
+### F. Standard Types
+
+#### `std::optional<T>`
+
+Holds either a value of type `T`, or nothing (`std::nullopt`). It avoids sentinel values (like `-1`, `SIZE_MAX`, or a `nullptr` pointer) to represent "no value."
+
+```cpp
+std::optional<std::size_t> currentBehaviorIndex_;
+
+if (currentBehaviorIndex_.has_value()) {
+    std::size_t idx = *currentBehaviorIndex_;  // dereference to get the value
+}
+
+currentBehaviorIndex_.reset();  // clear it — back to "no value"
+```
+
+`BehaviorTree` uses `optional<size_t>` for `currentBehaviorIndex_` because "no behaviour is currently running" is a valid and meaningful state. A sentinel like `SIZE_MAX` would work, but it requires documentation and defensive checks everywhere. `optional` makes the absence of a value self-documenting and impossible to accidentally interpret as a real index.
+
+#### Sized integer types
+
+`<cstdint>` provides integers with guaranteed sizes: `std::uint8_t` (8-bit unsigned), `std::int32_t` (32-bit signed), `std::uint64_t` (64-bit unsigned), etc.
+
+Plain `int` is implementation-defined in size (typically 32-bit, but not guaranteed). On different platforms or compilers, `int` may be 16 or 64 bits. `uint8_t` is always exactly 8 bits.
+
+`Status` uses `uint8_t` because three states fit in 2 bits — any larger integer type wastes space when Status values are stored in arrays or structs. `lastTickId_` uses `uint64_t` because tick IDs must never wrap around in a long-running session.
+
+#### `std::size_t`
+
+The unsigned integer type returned by `sizeof` and used for sizes and indices into containers. On 64-bit platforms it is typically 64 bits wide. Using `size_t` for loop indices and counts that index into `std::vector` avoids signed/unsigned comparison warnings and matches the type of `vector::size()`.
+
+#### `std::string_view`
+
+A non-owning reference to a sequence of characters. It holds a pointer and a length but owns no memory. It can refer to a `std::string`, a string literal, or any contiguous char sequence without copying.
+
+```cpp
+void Node::setName(std::string_view name);  // accepts string, literal, view — no copy
+```
+
+Passing `const std::string&` requires the argument to already be a `std::string`. Passing a string literal forces a temporary `std::string` to be constructed. `string_view` accepts both with zero allocation. The caveat: the pointed-to data must outlive the `string_view` — it cannot be stored past the caller's scope without copying into a `std::string`.
+
+---
+
+### G. Templates
+
+#### `template <typename T>`
+
+Templates let a function or class be parameterized by a type. The compiler generates a concrete version for each type used with the template. The template itself is not compiled — only the instantiations are.
+
+```cpp
+template <typename T>
+void Blackboard::registerSource(const std::string& key, std::function<T()> source) {
+    sources_[key] = [src = std::move(source)]() -> std::any { return src(); };
+}
+```
+
+Calling `registerSource<float>("health", ...)` causes the compiler to generate a version of the function with `T = float`. The lambda inside captures a `std::function<float()>` and wraps it to return `std::any`. The same template called with `T = bool` generates a separate version that wraps a `std::function<bool()>`.
+
+Templates are resolved entirely at compile time. There is no runtime overhead for the dispatch — the correct version of the function is baked in during compilation. The cost is that each instantiation produces separate compiled code, which can increase binary size when many types are used.
+
+In the Blackboard, templates are used at the boundary (registration and retrieval) while the interior storage is type-erased via `std::any`. This gives the caller a typed, safe API without requiring the map itself to be templated.
