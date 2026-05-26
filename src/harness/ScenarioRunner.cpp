@@ -1,4 +1,5 @@
 #include "bt/ScenarioRunner.h"
+#include <algorithm>
 
 namespace bt {
 

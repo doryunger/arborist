@@ -10,12 +10,12 @@ namespace bt {
 
 class SchemaIssue {
 public:
-    enum class Severity : std::uint8_t { ERROR, WARNING };
+    enum class Severity : std::uint8_t { kError, kWarning };
 
     SchemaIssue(Severity severity, std::string message)
         : severity_(severity), message_(std::move(message)) {}
 
-    [[nodiscard]] bool isError() const noexcept { return severity_ == Severity::ERROR; }
+    [[nodiscard]] bool isError() const noexcept { return severity_ == Severity::kError; }
     [[nodiscard]] const std::string& message() const noexcept { return message_; }
 
 private:
