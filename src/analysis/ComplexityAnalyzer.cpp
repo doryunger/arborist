@@ -41,14 +41,14 @@ void walkNode(const Node& node, std::size_t depth, const std::string& path,
         if (kidCount == 0) {
             state.issues->push_back({
                 ComplexityAnalyzer::Issue::Code::EMPTY_COMPOSITE,
-                ComplexityAnalyzer::Issue::Severity::ERROR,
+                ComplexityAnalyzer::Issue::Severity::kError,
                 path,
                 "Composite node '" + std::string(node.name()) + "' has no children"
             });
         } else if (kidCount == 1) {
             state.issues->push_back({
                 ComplexityAnalyzer::Issue::Code::SINGLE_CHILD_COMPOSITE,
-                ComplexityAnalyzer::Issue::Severity::WARNING,
+                ComplexityAnalyzer::Issue::Severity::kWarning,
                 path,
                 "Composite node '" + std::string(node.name()) + "' has only one child"
             });
@@ -60,7 +60,7 @@ void walkNode(const Node& node, std::size_t depth, const std::string& path,
             if (policy.threshold() > kidCount) {
                 state.issues->push_back({
                     ComplexityAnalyzer::Issue::Code::PARALLEL_THRESHOLD_UNREACHABLE,
-                    ComplexityAnalyzer::Issue::Severity::ERROR,
+                    ComplexityAnalyzer::Issue::Severity::kError,
                     path,
                     "Parallel '" + std::string(node.name()) + "' threshold " +
                     std::to_string(policy.threshold()) + " exceeds child count " +
@@ -135,7 +135,7 @@ ComplexityAnalyzer::Report ComplexityAnalyzer::analyze(const BehaviorTree& tree,
     if (report.maxDepth > thresholds.maxDepth) {
         report.issues.push_back({
             Issue::Code::DEPTH_EXCEEDED,
-            Issue::Severity::WARNING,
+            Issue::Severity::kWarning,
             std::string(tree.root().name()),
             "Max depth " + std::to_string(report.maxDepth) +
             " exceeds threshold " + std::to_string(thresholds.maxDepth)
@@ -144,7 +144,7 @@ ComplexityAnalyzer::Report ComplexityAnalyzer::analyze(const BehaviorTree& tree,
     if (report.maxWidth > thresholds.maxWidth) {
         report.issues.push_back({
             Issue::Code::WIDTH_EXCEEDED,
-            Issue::Severity::WARNING,
+            Issue::Severity::kWarning,
             std::string(tree.root().name()),
             "Max width " + std::to_string(report.maxWidth) +
             " exceeds threshold " + std::to_string(thresholds.maxWidth)
@@ -153,7 +153,7 @@ ComplexityAnalyzer::Report ComplexityAnalyzer::analyze(const BehaviorTree& tree,
     if (report.totalNodes > thresholds.maxTotalNodes) {
         report.issues.push_back({
             Issue::Code::NODE_COUNT_EXCEEDED,
-            Issue::Severity::WARNING,
+            Issue::Severity::kWarning,
             std::string(tree.root().name()),
             "Total node count " + std::to_string(report.totalNodes) +
             " exceeds threshold " + std::to_string(thresholds.maxTotalNodes)
@@ -167,7 +167,7 @@ ComplexityAnalyzer::Report ComplexityAnalyzer::analyze(const BehaviorTree& tree,
         if (!metas[idx].condition && idx + 1 < metas.size()) {
             report.issues.push_back({
                 Issue::Code::PRIORITY_SHADOW,
-                Issue::Severity::ERROR,
+                Issue::Severity::kError,
                 "root",
                 "Behavior '" + metas[idx].name + "' has no condition and shadows " +
                 std::to_string(metas.size() - idx - 1) + " behavior(s) that follow it"
@@ -185,7 +185,7 @@ ComplexityAnalyzer::Report ComplexityAnalyzer::analyze(const BehaviorTree& tree,
         if (!hasFallback) {
             report.issues.push_back({
                 Issue::Code::NO_FALLBACK_BEHAVIOR,
-                Issue::Severity::WARNING,
+                Issue::Severity::kWarning,
                 "root",
                 "No unconditional behavior: tree returns FAILURE when no condition is true"
             });

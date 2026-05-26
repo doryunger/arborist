@@ -1,0 +1,10 @@
+{
+  "name": "arborist-poc",
+  "version-string": "0.1.0",
+  "description": "Arborist behaviour-tree framework (proof-of-concept)",
+  "dependencies": [
+    "yaml-cpp",
+    "sqlite3",
+    "cpp-httplib"
+  ]
+}
