@@ -3,7 +3,7 @@
   "version-string": "0.1.0",
   "description": "Arborist behaviour-tree framework (proof-of-concept)",
   "dependencies": [
-    "yaml-cpp",
+    "ryml",
     "sqlite3",
     "cpp-httplib",
     { "name": "vcpkg-cmake", "host": true },
