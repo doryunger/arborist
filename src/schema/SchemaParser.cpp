@@ -14,8 +14,11 @@ struct ThrowingRyml {
     ryml::Callbacks prev_;
     ThrowingRyml() : prev_(ryml::get_callbacks()) {
         ryml::Callbacks cb = prev_;
-        cb.m_error = [](const char* msg, size_t len, ryml::Location, void*) {
-            throw SchemaParseError(std::string(msg, len));
+        cb.m_error_basic = [](ryml::csubstr msg, ryml::ErrorDataBasic const&, void*) {
+            throw SchemaParseError(std::string(msg.data(), msg.len));
+        };
+        cb.m_error_parse = [](ryml::csubstr msg, ryml::ErrorDataParse const&, void*) {
+            throw SchemaParseError(std::string(msg.data(), msg.len));
         };
         ryml::set_callbacks(cb);
     }
