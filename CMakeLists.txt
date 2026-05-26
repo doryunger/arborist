@@ -22,7 +22,7 @@ if(ENABLE_CLANG_TIDY)
     endif()
 endif()
 
-find_package(yaml-cpp REQUIRED)
+find_package(ryml     CONFIG REQUIRED)
 find_package(SQLite3  REQUIRED)
 find_package(Threads  REQUIRED)
 
@@ -57,7 +57,7 @@ if(BT_SOURCES)
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
     )
-    target_link_libraries(bt_framework PUBLIC  yaml-cpp SQLite::SQLite3)
+    target_link_libraries(bt_framework PUBLIC  ryml::ryml SQLite::SQLite3)
     target_link_libraries(bt_framework PRIVATE httplib::httplib Threads::Threads)
 else()
     add_library(bt_framework INTERFACE)
