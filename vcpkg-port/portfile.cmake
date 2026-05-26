@@ -1,7 +1,7 @@
 vcpkg_from_github(
     OUT_SOURCE_PATH SOURCE_PATH
     REPO doryunger/arborist
-    REF a20707894dc021249ac13a7ca5c578613ba7d49d
+    REF 68a4449b9f61a216ce191a00aa3e7036db79e2dd
     SHA512 0
     HEAD_REF main
 )
