@@ -1,6 +1,7 @@
 #include "bt/SchemaParser.h"
 
-#include <yaml-cpp/yaml.h>
+#include <ryml/ryml.hpp>
+#include <ryml/ryml_std.hpp>
 
 #include <memory>
 #include <string>
@@ -9,153 +10,129 @@ namespace bt {
 
 namespace {
 
-std::unique_ptr<SchemaNode> parseNode(const YAML::Node& node);
-
-void parseChildren(const YAML::Node& node, SchemaNode& out) {
-    if (!node["children"]) {
-        return;
+struct ThrowingRyml {
+    ryml::Callbacks prev_;
+    ThrowingRyml() : prev_(ryml::get_callbacks()) {
+        ryml::Callbacks cb = prev_;
+        cb.m_error = [](const char* msg, size_t len, ryml::Location, void*) {
+            throw SchemaParseError(std::string(msg, len));
+        };
+        ryml::set_callbacks(cb);
     }
-    for (const auto& child : node["children"]) {
+    ~ThrowingRyml() { ryml::set_callbacks(prev_); }
+};
+
+static std::string rval(ryml::ConstNodeRef n) { return {n.val().data(), n.val().len}; }
+static bool has(ryml::ConstNodeRef n, const char* k) { return n.is_map() && n.has_child(k); }
+
+std::unique_ptr<SchemaNode> parseNode(ryml::ConstNodeRef node);
+
+void parseChildren(ryml::ConstNodeRef node, SchemaNode& out) {
+    if (!has(node, "children")) return;
+    for (ryml::ConstNodeRef child : node["children"])
         out.children.push_back(parseNode(child));
-    }
 }
 
-std::unique_ptr<SchemaNode> parseLeaf(SchemaNodeType type, const YAML::Node& node) {
-    if (!node["name"]) {
+std::unique_ptr<SchemaNode> parseLeaf(SchemaNodeType type, ryml::ConstNodeRef node) {
+    if (!has(node, "name"))
         throw SchemaParseError("leaf node missing required field 'name'");
-    }
-    auto schemaNode = std::make_unique<SchemaNode>();
-    schemaNode->type = type;
-    schemaNode->name = node["name"].as<std::string>();
-    return schemaNode;
+    auto sn = std::make_unique<SchemaNode>();
+    sn->type = type;
+    sn->name = rval(node["name"]);
+    return sn;
 }
 
-std::unique_ptr<SchemaNode> parseParallel(const YAML::Node& node) {
-    auto schemaNode = std::make_unique<SchemaNode>();
-    schemaNode->type = SchemaNodeType::PARALLEL;
-
-    if (node["policy"]) {
-        auto policyStr = node["policy"].as<std::string>();
-        if (policyStr == "all") {
-            schemaNode->policy = SchemaPolicy::ALL;
-        } else if (policyStr == "any") {
-            schemaNode->policy = SchemaPolicy::ANY;
-        } else if (policyStr == "threshold") {
-            schemaNode->policy = SchemaPolicy::THRESHOLD;
-            if (node["threshold"]) {
-                schemaNode->threshold = node["threshold"].as<std::size_t>();
-            }
+std::unique_ptr<SchemaNode> parseParallel(ryml::ConstNodeRef node) {
+    auto sn = std::make_unique<SchemaNode>();
+    sn->type = SchemaNodeType::PARALLEL;
+    if (has(node, "policy")) {
+        auto p = rval(node["policy"]);
+        if (p == "all") {
+            sn->policy = SchemaPolicy::ALL;
+        } else if (p == "any") {
+            sn->policy = SchemaPolicy::ANY;
+        } else if (p == "threshold") {
+            sn->policy = SchemaPolicy::THRESHOLD;
+            if (has(node, "threshold"))
+                node["threshold"] >> sn->threshold;
         } else {
-            throw SchemaParseError("unknown parallel policy: " + policyStr);
+            throw SchemaParseError("unknown parallel policy: " + p);
         }
     }
-
-    parseChildren(node, *schemaNode);
-    return schemaNode;
+    parseChildren(node, *sn);
+    return sn;
 }
 
-std::unique_ptr<SchemaNode> parseNode(const YAML::Node& node) {
-    if (!node["type"]) {
+std::unique_ptr<SchemaNode> parseNode(ryml::ConstNodeRef node) {
+    if (!has(node, "type"))
         throw SchemaParseError("node missing required field 'type'");
-    }
-
-    auto typeStr = node["type"].as<std::string>();
-    std::unique_ptr<SchemaNode> schemaNode;
-
-    if (typeStr == "action") {
-        schemaNode = parseLeaf(SchemaNodeType::ACTION, node);
-    } else if (typeStr == "condition") {
-        schemaNode = parseLeaf(SchemaNodeType::CONDITION, node);
-    } else if (typeStr == "sequence") {
-        schemaNode = std::make_unique<SchemaNode>();
-        schemaNode->type = SchemaNodeType::SEQUENCE;
-        if (node["name"]) {
-            schemaNode->name = node["name"].as<std::string>();
-        }
-        parseChildren(node, *schemaNode);
-    } else if (typeStr == "selector") {
-        schemaNode = std::make_unique<SchemaNode>();
-        schemaNode->type = SchemaNodeType::SELECTOR;
-        if (node["name"]) {
-            schemaNode->name = node["name"].as<std::string>();
-        }
-        parseChildren(node, *schemaNode);
-    } else if (typeStr == "parallel") {
-        schemaNode = parseParallel(node);
+    auto t = rval(node["type"]);
+    std::unique_ptr<SchemaNode> sn;
+    if (t == "action") {
+        sn = parseLeaf(SchemaNodeType::ACTION, node);
+    } else if (t == "condition") {
+        sn = parseLeaf(SchemaNodeType::CONDITION, node);
+    } else if (t == "sequence") {
+        sn = std::make_unique<SchemaNode>();
+        sn->type = SchemaNodeType::SEQUENCE;
+        if (has(node, "name")) sn->name = rval(node["name"]);
+        parseChildren(node, *sn);
+    } else if (t == "selector") {
+        sn = std::make_unique<SchemaNode>();
+        sn->type = SchemaNodeType::SELECTOR;
+        if (has(node, "name")) sn->name = rval(node["name"]);
+        parseChildren(node, *sn);
+    } else if (t == "parallel") {
+        sn = parseParallel(node);
     } else {
-        throw SchemaParseError("unknown node type: " + typeStr);
+        throw SchemaParseError("unknown node type: " + t);
     }
-
-    if (node["intent"]) {
-        schemaNode->intent = node["intent"].as<std::string>();
-    }
-
-    return schemaNode;
+    if (has(node, "intent")) sn->intent = rval(node["intent"]);
+    return sn;
 }
 
-BehaviorSchema parseBehavior(const YAML::Node& node) {
-    if (!node["name"]) {
+BehaviorSchema parseBehavior(ryml::ConstNodeRef node) {
+    if (!has(node, "name"))
         throw SchemaParseError("behavior missing required field 'name'");
-    }
-    BehaviorSchema behavior;
-    behavior.name = node["name"].as<std::string>();
-    if (node["when"]) {
-        behavior.condition = node["when"].as<std::string>();
-    }
-    if (node["intent"]) {
-        behavior.intent = node["intent"].as<std::string>();
-    }
-    if (node["interruptible"]) {
-        behavior.interruptible = node["interruptible"].as<bool>();
-    }
-    if (node["tree"]) {
-        behavior.tree = parseNode(node["tree"]);
-    }
-    return behavior;
+    BehaviorSchema b;
+    b.name = rval(node["name"]);
+    if (has(node, "when"))          b.condition     = rval(node["when"]);
+    if (has(node, "intent"))        b.intent        = rval(node["intent"]);
+    if (has(node, "interruptible")) node["interruptible"] >> b.interruptible;
+    if (has(node, "tree"))          b.tree          = parseNode(node["tree"]);
+    return b;
 }
 
 }  // namespace
 
 SchemaDoc SchemaParser::parse(std::string_view yaml) {
-    YAML::Node root;
-    try {
-        root = YAML::Load(std::string(yaml));
-    } catch (const YAML::Exception& ex) {
-        throw SchemaParseError(ex.what());
-    }
+    ThrowingRyml guard;
+    ryml::Tree tree = ryml::parse_in_arena(ryml::to_csubstr(yaml));
 
-    if (!root["schema_version"]) {
+    ryml::ConstNodeRef root = tree.rootref();
+    if (!has(root, "schema_version"))
         throw SchemaParseError("missing required field 'schema_version'");
-    }
 
     SchemaDoc doc;
-    doc.schemaVersion = root["schema_version"].as<std::string>();
+    doc.schemaVersion = rval(root["schema_version"]);
+    if (has(root, "subtree")) doc.subtreeName = rval(root["subtree"]);
 
-    if (root["subtree"]) {
-        doc.subtreeName = root["subtree"].as<std::string>();
+    if (has(root, "import")) {
+        for (ryml::ConstNodeRef imp : root["import"])
+            doc.imports.push_back(rval(imp));
     }
-
-    if (root["import"]) {
-        for (const auto& imp : root["import"]) {
-            doc.imports.push_back(imp.as<std::string>());
-        }
-    }
-
-    if (root["state"]) {
-        for (const auto& entry : root["state"]) {
+    if (has(root, "state")) {
+        for (ryml::ConstNodeRef e : root["state"]) {
             StateDeclaration decl;
-            decl.key = entry["key"].as<std::string>();
-            decl.type = entry["type"].as<std::string>();
+            decl.key  = rval(e["key"]);
+            decl.type = rval(e["type"]);
             doc.stateDeclarations.push_back(std::move(decl));
         }
     }
-
-    if (root["behaviors"]) {
-        for (const auto& behavior : root["behaviors"]) {
-            doc.behaviors.push_back(parseBehavior(behavior));
-        }
+    if (has(root, "behaviors")) {
+        for (ryml::ConstNodeRef b : root["behaviors"])
+            doc.behaviors.push_back(parseBehavior(b));
     }
-
     return doc;
 }
 
