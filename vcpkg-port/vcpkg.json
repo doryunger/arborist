@@ -5,6 +5,8 @@
   "dependencies": [
     "yaml-cpp",
     "sqlite3",
-    "cpp-httplib"
+    "cpp-httplib",
+    { "name": "vcpkg-cmake", "host": true },
+    { "name": "vcpkg-cmake-config", "host": true }
   ]
 }
