@@ -22,7 +22,7 @@ void checkDuplicates(const SchemaDoc& doc, std::vector<SchemaIssue>& issues) {
     std::unordered_set<std::string> seen;
     for (const auto& behavior : doc.behaviors) {
         if (seen.contains(behavior.name)) {
-            issues.emplace_back(SchemaIssue::Severity::ERROR,
+            issues.emplace_back(SchemaIssue::Severity::kError,
                                  "duplicate behavior name: " + behavior.name);
         }
         seen.insert(behavior.name);
@@ -32,7 +32,7 @@ void checkDuplicates(const SchemaDoc& doc, std::vector<SchemaIssue>& issues) {
 void checkMissingTrees(const SchemaDoc& doc, std::vector<SchemaIssue>& issues) {
     for (const auto& behavior : doc.behaviors) {
         if (!behavior.tree) {
-            issues.emplace_back(SchemaIssue::Severity::ERROR,
+            issues.emplace_back(SchemaIssue::Severity::kError,
                                  "behavior '" + behavior.name + "' has no tree defined");
         }
     }
@@ -44,14 +44,14 @@ void checkDefaultBehavior(const SchemaDoc& doc, std::vector<SchemaIssue>& issues
             return;
         }
     }
-    issues.emplace_back(SchemaIssue::Severity::WARNING,
+    issues.emplace_back(SchemaIssue::Severity::kWarning,
                          "no default behavior (a behavior without a 'when' condition)");
 }
 
 void checkBehaviorRefs(const BehaviorSchema& behavior, const SchemaRegistry& registry,
                         std::vector<SchemaIssue>& issues) {
     if (!behavior.condition.empty() && !registry.conditions.contains(behavior.condition)) {
-        issues.emplace_back(SchemaIssue::Severity::ERROR,
+        issues.emplace_back(SchemaIssue::Severity::kError,
                              "unknown condition '" + behavior.condition + "' in behavior '" +
                                  behavior.name + "'");
     }
@@ -64,14 +64,14 @@ void checkBehaviorRefs(const BehaviorSchema& behavior, const SchemaRegistry& reg
 
     for (const auto& action : actionRefs) {
         if (!registry.actions.contains(action)) {
-            issues.emplace_back(SchemaIssue::Severity::ERROR,
+            issues.emplace_back(SchemaIssue::Severity::kError,
                                  "unknown action '" + action + "' in behavior '" +
                                      behavior.name + "'");
         }
     }
     for (const auto& cond : conditionRefs) {
         if (!registry.conditions.contains(cond)) {
-            issues.emplace_back(SchemaIssue::Severity::ERROR,
+            issues.emplace_back(SchemaIssue::Severity::kError,
                                  "unknown condition '" + cond + "' in behavior '" +
                                      behavior.name + "'");
         }
@@ -90,7 +90,7 @@ void checkRegistryRefs(const SchemaDoc& doc, const SchemaRegistry& registry,
 std::vector<SchemaIssue> SchemaValidator::validate(const SchemaDoc& doc) {
     std::vector<SchemaIssue> issues;
     if (doc.behaviors.empty()) {
-        issues.emplace_back(SchemaIssue::Severity::ERROR, "schema has no behaviors defined");
+        issues.emplace_back(SchemaIssue::Severity::kError, "schema has no behaviors defined");
         return issues;
     }
     checkDuplicates(doc, issues);

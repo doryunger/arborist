@@ -5,8 +5,12 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# ── Linting ───────────────────────────────────────────────────────────────────
-option(ENABLE_CLANG_TIDY "Run clang-tidy during build" ON)
+option(ENABLE_CLANG_TIDY       "Run clang-tidy during build"  ON)
+option(ARBORIST_BUILD_TESTS     "Build test suite"             ON)
+option(ARBORIST_BUILD_EXAMPLES  "Build examples"               ON)
+option(ARBORIST_BUILD_BENCHMARKS "Build benchmarks"            ON)
+option(ARBORIST_BUILD_TOOLS     "Build playground and editor"  ON)
+option(ARBORIST_INSTALL         "Generate install rules"       OFF)
 
 if(ENABLE_CLANG_TIDY)
     find_program(CLANG_TIDY_EXE NAMES clang-tidy)
@@ -18,21 +22,22 @@ if(ENABLE_CLANG_TIDY)
     endif()
 endif()
 
-# ── Dependencies ──────────────────────────────────────────────────────────────
 find_package(yaml-cpp REQUIRED)
-find_package(SQLite3 REQUIRED)
-find_package(Threads REQUIRED)
+find_package(SQLite3  REQUIRED)
+find_package(Threads  REQUIRED)
 
-include(FetchContent)
-FetchContent_Declare(
-    httplib
-    GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
-    GIT_TAG        v0.18.1
-)
-set(HTTPLIB_COMPILE OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(httplib)
+find_package(httplib QUIET)
+if(NOT httplib_FOUND)
+    include(FetchContent)
+    FetchContent_Declare(
+        httplib
+        GIT_REPOSITORY https://github.com/yhirose/cpp-httplib.git
+        GIT_TAG        v0.18.1
+    )
+    set(HTTPLIB_COMPILE OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(httplib)
+endif()
 
-# ── Library ───────────────────────────────────────────────────────────────────
 file(GLOB_RECURSE BT_SOURCES
     src/runtime/*.cpp
     src/builder/*.cpp
@@ -48,15 +53,37 @@ file(GLOB_RECURSE BT_SOURCES
 
 if(BT_SOURCES)
     add_library(bt_framework ${BT_SOURCES})
-    target_include_directories(bt_framework PUBLIC include)
-    target_link_libraries(bt_framework PUBLIC yaml-cpp SQLite::SQLite3)
+    target_include_directories(bt_framework PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+    )
+    target_link_libraries(bt_framework PUBLIC  yaml-cpp SQLite::SQLite3)
     target_link_libraries(bt_framework PRIVATE httplib::httplib Threads::Threads)
 else()
     add_library(bt_framework INTERFACE)
-    target_include_directories(bt_framework INTERFACE include)
+    target_include_directories(bt_framework INTERFACE
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+    )
 endif()
 
-# ── Format target ─────────────────────────────────────────────────────────────
+if(ARBORIST_INSTALL)
+    include(GNUInstallDirs)
+    include(CMakePackageConfigHelpers)
+
+    install(TARGETS bt_framework
+        EXPORT  arborist-poc-targets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    )
+    install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+    install(EXPORT arborist-poc-targets
+        FILE      arborist-poc-config.cmake
+        NAMESPACE arborist_poc::
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/arborist-poc
+    )
+endif()
+
 find_program(CLANG_FORMAT_EXE NAMES clang-format)
 if(CLANG_FORMAT_EXE)
     file(GLOB_RECURSE ALL_CXX_FILES
@@ -73,15 +100,19 @@ if(CLANG_FORMAT_EXE)
         COMMAND ${CLANG_FORMAT_EXE} --dry-run --Werror ${ALL_CXX_FILES}
         COMMENT "Checking source formatting"
     )
-    message(STATUS "clang-format enabled: ${CLANG_FORMAT_EXE}")
-else()
-    message(WARNING "clang-format not found — format targets disabled")
 endif()
 
-# ── Tests ─────────────────────────────────────────────────────────────────────
-enable_testing()
-add_subdirectory(tests)
-add_subdirectory(examples)
-add_subdirectory(benchmarks)
-add_subdirectory(playground)
-add_subdirectory(editor)
+if(ARBORIST_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
+if(ARBORIST_BUILD_EXAMPLES)
+    add_subdirectory(examples)
+endif()
+if(ARBORIST_BUILD_BENCHMARKS)
+    add_subdirectory(benchmarks)
+endif()
+if(ARBORIST_BUILD_TOOLS)
+    add_subdirectory(playground)
+    add_subdirectory(editor)
+endif()

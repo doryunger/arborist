@@ -24,14 +24,14 @@ public:
             WIDTH_EXCEEDED,
             NODE_COUNT_EXCEEDED,
         };
-        enum class Severity : std::uint8_t { WARNING, ERROR };
+        enum class Severity : std::uint8_t { kWarning, kError };
 
         Code        code;
         Severity    severity;
         std::string nodePath;
         std::string message;
 
-        [[nodiscard]] bool isError() const noexcept { return severity == Severity::ERROR; }
+        [[nodiscard]] bool isError() const noexcept { return severity == Severity::kError; }
     };
 
     struct Thresholds {
