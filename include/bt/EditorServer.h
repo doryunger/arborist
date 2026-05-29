@@ -31,7 +31,8 @@ public:
     // schemaPath: path to the YAML file the editor loads and saves.
     // Pass an empty string to run without file persistence (read-only mode).
     explicit EditorServer(RegistryStore& store,
-                          std::string_view schemaPath = "");
+                          std::string_view schemaPath = "",
+                          std::string_view uiDir = "");
     ~EditorServer();
 
     EditorServer(const EditorServer&) = delete;
@@ -88,6 +89,7 @@ public:
 private:
     RegistryStore*        store_;
     std::string           schemaPath_;
+    std::string           uiDir_;
     bool                  running_{false};
     BehaviorTree*         attachedTree_{nullptr};
     const LoaderRegistry* attachedReg_{nullptr};

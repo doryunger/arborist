@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Arborist — Behavior Tree Editor</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body { margin: 0; background: #1e1e2e; color: #cdd6f4; font-family: monospace; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+  #header { padding: 10px 18px; background: #181825; border-bottom: 1px solid #313244; display: flex; align-items: center; gap: 14px; }
+  #header h1 { margin: 0; font-size: 15px; color: #89b4fa; letter-spacing: 0.05em; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #a6e3a1; color: #1e1e2e; font-weight: bold; }
+  .badge.disconnected { background: #f38ba8; }
+  .badge.pending { background: #f9e2af; color: #1e1e2e; }
+  #main { display: flex; flex: 1; overflow: hidden; }
+  .panel { padding: 14px; overflow-y: auto; }
+  #pending-panel { width: 260px; border-right: 1px solid #313244; display: flex; flex-direction: column; gap: 8px; flex-shrink: 0; }
+  .pending-hdr { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .pending-hdr h2 { flex: 1; margin: 0; }
+  .change-card { background: #181825; border: 1px solid #45475a; border-left: 3px solid #f9e2af; border-radius: 5px; padding: 7px 9px; font-size: 11px; cursor: pointer; transition: border-color 0.15s; }
+  .change-card:hover { border-color: #f9e2af; background: #1e1e2e; }
+  .change-beh { font-size: 10px; color: #6c7086; margin-bottom: 2px; }
+  .change-name { color: #f9e2af; font-weight: bold; margin-bottom: 4px; }
+  .change-row { display: flex; align-items: center; gap: 4px; font-size: 10px; margin-bottom: 2px; }
+  .change-label { color: #6c7086; min-width: 36px; }
+  .change-old { color: #f38ba8; text-decoration: line-through; }
+  .change-arrow { color: #585b70; }
+  .change-new { color: #a6e3a1; }
+  .change-revert { font-size: 9px; padding: 1px 6px; margin-top: 5px; }
+  #schema-panel { flex: 1; display: flex; flex-direction: column; gap: 10px; overflow: hidden; padding: 14px; }
+  h2 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: #89b4fa; }
+  #schema-view { display: flex; flex-direction: column; flex: 1; overflow: hidden; gap: 10px; }
+  #schema-yaml { flex: 1; background: #181825; border: 1px solid #313244; border-radius: 5px; padding: 10px; font-size: 11px; white-space: pre; overflow: auto; color: #a6e3a1; min-height: 0; }
+  #analyze-section { border-top: 1px solid #313244; padding-top: 10px; }
+  .issue { padding: 5px 8px; border-radius: 4px; margin-bottom: 5px; font-size: 11px; }
+  .issue.ERROR   { background: #3a1e1e; border-left: 3px solid #f38ba8; color: #f38ba8; }
+  .issue.WARNING { background: #3a2e1e; border-left: 3px solid #fab387; color: #fab387; }
+  .issue.clean   { background: #1e3a2e; border-left: 3px solid #a6e3a1; color: #a6e3a1; }
+  .metric { display: inline-block; margin-right: 14px; font-size: 11px; color: #a6adc8; }
+  .metric span { color: #cdd6f4; font-weight: bold; }
+  button { background: #313244; color: #cdd6f4; border: 1px solid #45475a; border-radius: 4px; padding: 5px 12px; font-size: 11px; font-family: monospace; cursor: pointer; }
+  button:hover { background: #45475a; }
+  button:disabled { opacity: 0.4; cursor: default; }
+  .view-btn { padding: 3px 9px; font-size: 10px; }
+  .view-btn.active { background: #1e3a5f; color: #89b4fa; border-color: #89b4fa; }
+  .btn-danger { color: #f38ba8; border-color: #f38ba8; }
+  .btn-danger:hover { background: #3a1e1e; }
+  .btn-validate { color: #f9e2af; border-color: #f9e2af; }
+  .btn-validate:hover { background: #2e2a1e; }
+  .toolbar { display: flex; gap: 6px; align-items: center; }
+  .path-label { font-size: 10px; color: #585b70; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #graph-view { display: flex; flex-direction: column; flex: 1; overflow: hidden; gap: 6px; }
+  .graph-toolbar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .beh-dropdown { position: relative; }
+  #beh-trigger { display: flex; align-items: center; gap: 8px; min-width: 200px; max-width: 320px; }
+  #beh-trigger-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+  .beh-arrow { flex-shrink: 0; font-size: 9px; color: #6c7086; }
+  #beh-menu { position: absolute; top: calc(100% + 4px); left: 0; min-width: 280px; background: #181825; border: 1px solid #45475a; border-radius: 5px; z-index: 100; box-shadow: 0 6px 20px rgba(0,0,0,0.5); }
+  #beh-search { width: 100%; background: #11111b; border: none; border-bottom: 1px solid #313244; color: #cdd6f4; font-family: monospace; font-size: 11px; padding: 7px 10px; outline: none; border-radius: 5px 5px 0 0; }
+  #beh-search::placeholder { color: #585b70; }
+  #beh-items { max-height: 240px; overflow-y: auto; }
+  .beh-item { padding: 6px 10px; font-size: 11px; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+  .beh-item:hover { background: #313244; }
+  .beh-item.active { background: #1e3a5f; color: #89b4fa; }
+  .beh-item-name { flex: 1; }
+  .beh-item-cond { font-size: 10px; color: #6c7086; }
+  .graph-body { display: flex; gap: 8px; flex: 1; min-height: 0; }
+  #svg-container { flex: 1; overflow: auto; background: #181825; border: 1px solid #313244; border-radius: 5px; padding: 10px; min-height: 0; }
+  #edit-panel { width: 196px; background: #181825; border: 1px solid #313244; border-radius: 5px; padding: 10px; display: flex; flex-direction: column; gap: 6px; overflow-y: auto; flex-shrink: 0; }
+  #edit-panel label { font-size: 10px; color: #6c7086; margin-top: 4px; display: block; }
+  #edit-panel input, #edit-panel select { width: 100%; background: #1e1e2e; border: 1px solid #45475a; border-radius: 3px; color: #cdd6f4; font-family: monospace; font-size: 11px; padding: 4px 6px; }
+  #edit-panel input:focus, #edit-panel select:focus { outline: none; border-color: #89b4fa; }
+  .edit-row { display: flex; gap: 5px; }
+  .edit-row button { flex: 1; padding: 4px 6px; font-size: 10px; }
+  #edit-empty { font-size: 11px; color: #585b70; padding: 6px 0; }
+  #edit-reg-section { font-size: 10px; padding: 2px 0; }
+  #edit-prev-section { border-top: 1px solid #313244; margin-top: 6px; padding-top: 6px; }
+  #edit-prev-section h2 { color: #f9e2af; }
+  .prev-val { font-size: 11px; color: #a6adc8; padding: 1px 0; }
+  #status-bar { padding: 3px 18px; background: #11111b; font-size: 10px; color: #585b70; border-top: 1px solid #313244; }
+</style>
+</head>
+<body>
+<div id="header">
+  <h1>Arborist &#x2014; Editor</h1>
+  <span class="badge disconnected" id="conn-badge">connecting...</span>
+  <span id="schema-path" style="font-size:11px;color:#585b70;"></span>
+</div>
+<div id="main">
+  <div class="panel" id="pending-panel">
+    <div class="pending-hdr">
+      <h2>Pending Changes</h2>
+      <span class="badge pending" id="pending-count-badge" style="display:none">0</span>
+    </div>
+    <div id="pending-list"><em style="color:#585b70;font-size:11px">No pending changes</em></div>
+  </div>
+  <div id="schema-panel">
+    <div class="toolbar">
+      <h2 style="margin:0">Schema</h2>
+      <button onclick="loadSchema()">&#x21BA; Reload</button>
+      <button onclick="runAnalysis()">&#x26A1; Analyze</button>
+      <button id="validate-btn" class="btn-validate" onclick="validateChanges()" style="display:none">&#x2714; Validate</button>
+      <button class="view-btn active" id="btn-schema" onclick="showView('schema')">YAML</button>
+      <button class="view-btn" id="btn-graph" onclick="showView('graph')">Graph</button>
+      <span class="path-label" id="file-path-label"></span>
+    </div>
+    <div id="schema-view">
+      <pre id="schema-yaml">loading...</pre>
+      <div id="analyze-section" style="display:none">
+        <h2>Analysis</h2>
+        <div id="metrics-row"></div>
+        <div id="issues-list"></div>
+      </div>
+    </div>
+    <div id="graph-view" style="display:none">
+      <div class="graph-toolbar">
+        <div class="beh-dropdown" id="beh-dropdown">
+          <button id="beh-trigger" onclick="toggleBehDropdown()">
+            <span id="beh-trigger-label">select behavior</span>
+            <span class="beh-arrow">&#x25BE;</span>
+          </button>
+          <div id="beh-menu" style="display:none">
+            <input id="beh-search" type="text" placeholder="Search behaviors..." oninput="filterBehItems()">
+            <div id="beh-items"></div>
+          </div>
+        </div>
+        <button onclick="addBehavior()">+ Behavior</button>
+        <button id="save-btn" onclick="saveTree()">Save Schema</button>
+      </div>
+      <div class="graph-body">
+        <div id="svg-container"><em style="color:#585b70;font-size:11px">Click Graph to render</em></div>
+        <div id="edit-panel">
+          <div id="edit-empty">Select a node</div>
+          <div id="edit-form" style="display:none">
+            <h2>Edit Node</h2>
+            <label>Type</label>
+            <select id="edit-type" onchange="onEditTypeChange()">
+              <option value="action">action</option>
+              <option value="condition">condition</option>
+              <option value="sequence">sequence</option>
+              <option value="selector">selector</option>
+              <option value="parallel">parallel</option>
+            </select>
+            <label>Name</label>
+            <input id="edit-name" type="text" placeholder="node_name">
+            <div id="edit-policy-row" style="display:none">
+              <label>Policy</label>
+              <select id="edit-policy">
+                <option value="all">all</option>
+                <option value="any">any</option>
+                <option value="threshold">threshold</option>
+              </select>
+            </div>
+            <div class="edit-row" style="margin-top:6px">
+              <button onclick="applyNodeEdit()">Apply</button>
+              <button class="btn-danger" onclick="deleteSelectedNode()">Delete</button>
+            </div>
+            <div id="edit-add-child" style="display:none;margin-top:4px">
+              <button style="width:100%" onclick="addChildToSelected()">+ Add Child</button>
+            </div>
+            <div id="edit-reg-section" style="display:none"></div>
+            <div id="edit-prev-section" style="display:none">
+              <h2>Previous Values</h2>
+              <label>Type</label><div class="prev-val" id="edit-prev-type"></div>
+              <label>Name</label><div class="prev-val" id="edit-prev-name"></div>
+              <label>Policy</label><div class="prev-val" id="edit-prev-policy"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<div id="status-bar">Ready</div>
+<script src="/editor.js"></script>
+</body>
+</html>
