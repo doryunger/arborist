@@ -14,7 +14,8 @@ namespace bt {
 // never construct it in production builds where no viewer is needed.
 class MonitorServer {
 public:
-    MonitorServer(const BehaviorTree& tree, const DecisionEmitter& emitter);
+    MonitorServer(const BehaviorTree& tree, const DecisionEmitter& emitter,
+                  std::string_view uiDir = "");
     ~MonitorServer();
 
     MonitorServer(const MonitorServer&) = delete;
@@ -38,6 +39,7 @@ public:
 private:
     const BehaviorTree* tree_;
     const DecisionEmitter* emitter_;
+    std::string uiDir_;
     bool running_{false};
 
     struct Impl;
