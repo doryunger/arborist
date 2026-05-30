@@ -116,6 +116,18 @@ void MonitorServer::start(int port) {
         res.set_content(js, "application/javascript");
     });
 
+    impl_->server.Get("/simulator", [this](const httplib::Request&, httplib::Response& res) {
+        const std::string html = readFile(uiDir_ + "/simulator.html");
+        if (html.empty()) { res.status = 404; res.set_content("simulator.html not found", "text/plain"); return; }
+        res.set_content(html, "text/html");
+    });
+
+    impl_->server.Get("/simulator.js", [this](const httplib::Request&, httplib::Response& res) {
+        const std::string js = readFile(uiDir_ + "/simulator.js");
+        if (js.empty()) { res.status = 404; res.set_content("simulator.js not found", "text/plain"); return; }
+        res.set_content(js, "application/javascript");
+    });
+
     impl_->server.Get("/tree", [this](const httplib::Request&, httplib::Response& res) {
         res.set_content(TreeSerializer::toJson(tree_->root()), "application/json");
     });

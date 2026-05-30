@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Arborist — Simulator</title>
+<script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: #1e1e2e;
+    color: #cdd6f4;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+  }
+
+  /* ── Header ──────────────────────────────────────────────── */
+  #header { background: #181825; border-bottom: 1px solid #313244; flex-shrink: 0; }
+
+  #title-row {
+    padding: 8px 16px;
+    display: flex; align-items: center; gap: 10px;
+    border-bottom: 1px solid #252538;
+  }
+  #title-row h1 { margin: 0; font-size: 13px; color: #89b4fa; letter-spacing: 0.06em; }
+  .badge { padding: 2px 10px; border-radius: 20px; font-size: 11px; }
+  #tick-badge      { background: #313244; color: #a6adc8; }
+  #behavior-badge  { background: #1e3028; color: #a6e3a1; display: none; }
+  #status-badge    { font-weight: 600; display: none; border: 1px solid transparent; }
+  #live-dot        { margin-left: auto; font-size: 11px; color: #a6e3a1; letter-spacing: 0.04em; }
+  #live-dot.paused { color: #6c7086; }
+
+  /* ── Scrubber row ────────────────────────────────────────── */
+  #scrubber-row {
+    padding: 7px 16px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .ctrl-btn {
+    background: #313244; border: none; color: #cdd6f4;
+    border-radius: 4px; padding: 3px 11px; cursor: pointer;
+    font-size: 12px; font-family: inherit;
+    transition: background 0.12s;
+  }
+  .ctrl-btn:hover  { background: #45475a; }
+  .ctrl-btn:active { background: #585b70; }
+  #btn-play { min-width: 72px; }
+  #scrubber { flex: 1; accent-color: #89b4fa; cursor: pointer; height: 4px; }
+  #tick-counter { font-size: 11px; color: #6c7086; min-width: 64px; text-align: right; white-space: nowrap; }
+
+  /* ── Graph ───────────────────────────────────────────────── */
+  #graph { flex: 1; overflow: hidden; }
+
+  /* ── Legend ──────────────────────────────────────────────── */
+  #legend {
+    position: fixed; bottom: 18px; right: 18px; z-index: 20;
+    background: #181825; border: 1px solid #313244;
+    border-radius: 8px; padding: 10px 14px;
+    font-size: 11px; min-width: 136px;
+  }
+  #legend-title { color: #6c7086; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 8px; }
+  .legend-item { display: flex; align-items: center; gap: 9px; margin-bottom: 6px; color: #a6adc8; }
+  .legend-item:last-child { margin-bottom: 0; }
+  .ls { width: 18px; height: 14px; flex-shrink: 0; }
+  .ls-seq  { background: #1e2540; border: 1.5px solid #89b4fa; border-radius: 2px; }
+  .ls-sel  { background: #2a1e40; border: 1.5px solid #cba6f7; border-radius: 50%; }
+  .ls-par  { background: #2a2a1e; border: 1.5px solid #f9e2af; clip-path: polygon(25% 0%,75% 0%,100% 50%,75% 100%,25% 100%,0% 50%); }
+  .ls-act  { background: #1e3028; border: 1.5px solid #a6e3a1; border-radius: 5px; }
+  .ls-cond { background: #301e28; border: 1.5px solid #f38ba8; transform: rotate(45deg) scale(0.75); }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <div id="title-row">
+    <h1>Arborist</h1>
+    <span id="tick-badge"     class="badge">waiting…</span>
+    <span id="behavior-badge" class="badge"></span>
+    <span id="status-badge"   class="badge"></span>
+    <span id="live-dot">● LIVE</span>
+  </div>
+  <div id="scrubber-row">
+    <button id="btn-prev" class="ctrl-btn">◀</button>
+    <input  id="scrubber" type="range" min="0" max="0" value="0" step="1">
+    <button id="btn-next" class="ctrl-btn">▶</button>
+    <button id="btn-play" class="ctrl-btn">⏵ Play</button>
+    <span   id="tick-counter">— / —</span>
+  </div>
+</div>
+
+<div id="graph"></div>
+
+<div id="legend">
+  <div id="legend-title">Node types</div>
+  <div class="legend-item"><div class="ls ls-seq"></div>  Sequence</div>
+  <div class="legend-item"><div class="ls ls-sel"></div>  Selector</div>
+  <div class="legend-item"><div class="ls ls-par"></div>  Parallel</div>
+  <div class="legend-item"><div class="ls ls-act"></div>  Action</div>
+  <div class="legend-item"><div class="ls ls-cond"></div> Condition</div>
+</div>
+
+<script src="/simulator.js"></script>
+</body>
+</html>
