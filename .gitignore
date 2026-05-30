@@ -42,6 +42,9 @@ editor/arborist_schema.yaml
 bt_playground_schema.yaml
 bt_playground_registry.db
 
+# UE5 integration build output
+build-ue5/
+
 # IDE / tool directories
 .vscode/
 .DS_Store
