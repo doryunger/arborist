@@ -1,21 +1,25 @@
 const STATUS_COLOR = { SUCCESS: '#a6e3a1', FAILURE: '#f38ba8', RUNNING: '#fab387' };
 const DEFAULT_COLOR = '#585b70';
 let network = null;
-let nodeIds = {};
+let nodeIds = {};   // name -> [numericId, ...]
+let nodeCounter = 0;
 
 function buildGraph(node, nodes, edges, parentId) {
-  const id = node.name;
-  nodeIds[id] = true;
+  const id = nodeCounter++;
+  if (!nodeIds[node.name]) nodeIds[node.name] = [];
+  nodeIds[node.name].push(id);
   nodes.push({ id, label: node.name + '\n[' + node.type + ']',
     color: { background: DEFAULT_COLOR, border: '#7f849c' },
     font: { color: '#cdd6f4', size: 11 },
     shape: 'box' });
-  if (parentId) edges.push({ from: parentId, to: id, color: { color: '#585b70' } });
+  if (parentId !== null) edges.push({ from: parentId, to: id, color: { color: '#585b70' } });
   (node.children || []).forEach(c => buildGraph(c, nodes, edges, id));
 }
 
 async function loadTree() {
   try {
+    nodeIds = {};
+    nodeCounter = 0;
     const res = await fetch('/tree');
     const tree = await res.json();
     const nodes = [], edges = [];
@@ -23,12 +27,14 @@ async function loadTree() {
     const container = document.getElementById('graph');
     const data = { nodes: new vis.DataSet(nodes), edges: new vis.DataSet(edges) };
     const options = {
-      layout: { hierarchical: { direction: 'UD', sortMethod: 'directed', levelSeparation: 80 } },
+      layout: { hierarchical: { direction: 'UD', sortMethod: 'directed', levelSeparation: 100, nodeSpacing: 140, treeSpacing: 180 } },
       physics: false,
-      edges: { arrows: 'to' }
+      edges: { arrows: 'to' },
+      interaction: { zoomView: true, dragView: true }
     };
     if (network) network.destroy();
     network = new vis.Network(container, data, options);
+    network.once('afterDrawing', () => network.fit({ animation: false }));
     network._nodeData = data.nodes;
   } catch (e) { console.error('tree load failed', e); }
 }
@@ -42,15 +48,17 @@ async function refreshHistory() {
     document.getElementById('tick-info').textContent =
       'tick #' + latest.tick + ' — ' + (latest.behavior || '(none)') + ' → ' + latest.status;
     if (network && network._nodeData) {
-      const updates = Object.keys(nodeIds).map(id => ({
+      const updates = Object.values(nodeIds).flat().map(id => ({
         id, color: { background: DEFAULT_COLOR, border: '#7f849c' }
       }));
       (latest.activePath || []).forEach(entry => {
-        const upd = updates.find(u => u.id === entry.name);
-        if (upd) upd.color = {
-          background: STATUS_COLOR[entry.status] || DEFAULT_COLOR,
-          border: '#cdd6f4'
-        };
+        (nodeIds[entry.name] || []).forEach(id => {
+          const upd = updates.find(u => u.id === id);
+          if (upd) upd.color = {
+            background: STATUS_COLOR[entry.status] || DEFAULT_COLOR,
+            border: '#cdd6f4'
+          };
+        });
       });
       network._nodeData.update(updates);
     }
